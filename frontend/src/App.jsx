@@ -25,7 +25,7 @@ const getDashboardPath = (role) => {
     case "role4":
       return "/role4";
     default:
-      return "/";
+      return "/login";
   }
 };
 
@@ -36,7 +36,7 @@ const RoleRoute = ({ children, allowedRoles }) => {
     return <Loading />;
   }
 
-  if (!isAuth) {
+  if (!isAuth || !user || !user.role) {
     return <Navigate to="/login" replace />;
   }
 
@@ -59,7 +59,7 @@ const App = () => {
             <Route
               path="/"
               element={
-                isAuth ? (
+                isAuth && user && user.role ? (
                   <Navigate to={getDashboardPath(user.role)} replace />
                 ) : (
                   <Landing />

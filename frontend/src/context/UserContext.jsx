@@ -149,11 +149,18 @@ export const UserProvider = ({ children }) => {
   async function fetchUser() {
     try {
       const { data } = await api.get("/api/user/me");
-      setUser(data);
-      setIsAuth(true);
-      setLoading(false);
+      if (data && typeof data === "object" && data._id) {
+        setUser(data);
+        setIsAuth(true);
+      } else {
+        setUser(null);
+        setIsAuth(false);
+      }
     } catch (error) {
-      console.log(error);
+      console.log("Error fetching user session:", error);
+      setUser(null);
+      setIsAuth(false);
+    } finally {
       setLoading(false);
     }
   }
