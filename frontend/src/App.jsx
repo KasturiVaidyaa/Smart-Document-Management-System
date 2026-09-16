@@ -1,148 +1,89 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import Home from "./pages/Home";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { UserData } from "./context/UserContext";
+import { WorkspaceProvider } from "./context/WorkspaceContext";
 import { Loading } from "./components/Loading";
 import Forgot from "./pages/Forgot";
 import Reset from "./pages/Reset";
-import OtpVerify from "./pages/OtpVerify";
-import Role1Dashboard from "./pages/Role1Dashboard";
-import Role2Dashboard from "./pages/Role2Dashboard";
-import Role3Dashboard from "./pages/Role3Dashboard";
-import Role4Dashboard from "./pages/Role4Dashboard";
 import Landing from "./pages/Landing";
-import AdminVerification from "./pages/AdminVerification";
+import AppLayout from "./components/AppLayout";
+import Dashboard from "./pages/Dashboard";
+import Documents from "./pages/Documents";
+import Chat from "./pages/Chat";
 
-const getDashboardPath = (role) => {
-  switch (role) {
-    case "role1":
-      return "/role1";
-    case "role2":
-      return "/role2";
-    case "role3":
-      return "/role3";
-    case "role4":
-      return "/role4";
-    default:
-      return "/login";
-  }
+const Protected = ({ children }) => {
+  const { isAuth, loading } = UserData();
+  if (loading) return <Loading />;
+  if (!isAuth) return <Navigate to="/login" replace />;
+  return children;
 };
 
-const RoleRoute = ({ children, allowedRoles }) => {
-  const { isAuth, user, loading } = UserData();
-
-  if (loading) {
-    return <Loading />;
-  }
-
-  if (!isAuth || !user || !user.role) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (!allowedRoles.includes(user.role)) {
-    return <Navigate to={getDashboardPath(user.role)} replace />;
-  }
-
+const Guest = ({ children }) => {
+  const { isAuth, loading } = UserData();
+  if (loading) return <Loading />;
+  if (isAuth) return <Navigate to="/app" replace />;
   return children;
 };
 
 const App = () => {
-  const { loading, isAuth, user } = UserData();
-  return (
-    <>
-      {loading ? (
-        <Loading />
-      ) : (
-        <BrowserRouter>
-          <Routes>
-            <Route
-              path="/"
-              element={
-                isAuth && user && user.role ? (
-                  <Navigate to={getDashboardPath(user.role)} replace />
-                ) : (
-                  <Landing />
-                )
-              }
-            />
+  const { loading } = UserData();
 
-            <Route
-              path="/login"
-              element={
-                isAuth ? (
-                  <Navigate to={getDashboardPath(user.role)} replace />
-                ) : (
-                  <Login />
-                )
-              }
-            />
-            <Route
-              path="/verify/:token"
-              element={
-                isAuth ? (
-                  <Navigate to={getDashboardPath(user.role)} replace />
-                ) : (
-                  <OtpVerify />
-                )
-              }
-            />
-            <Route
-              path="/register"
-              element={ <Register />}
-            />
-            <Route
-              path="/forgot"
-              element={!isAuth ? <Forgot /> : <Navigate to={getDashboardPath(user.role)} replace />} 
-            />
-            <Route
-              path="/reset-password/:token"
-              element={<Reset />}
-            />
-            <Route
-              path="/role1"
-              element={
-                <RoleRoute allowedRoles={["role1"]}>
-                  <Role1Dashboard />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="/role2"
-              element={
-                <RoleRoute allowedRoles={["role2"]}>
-                  <Role2Dashboard />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="/role3"
-              element={
-                <RoleRoute allowedRoles={["role3"]}>
-                  <Role3Dashboard />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="/role4"
-              element={
-                <RoleRoute allowedRoles={["role4"]}>
-                  <Role4Dashboard />
-                </RoleRoute>
-              }
-            />
-            <Route
-              path="/admin/verification"
-              element={
-                <RoleRoute allowedRoles={["role4"]}>
-                  <AdminVerification />
-                </RoleRoute>
-              }
-            />
-          </Routes>
-        </BrowserRouter>
-      )}
-    </>
+  if (loading) return <Loading />;
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Guest>
+              <Landing />
+            </Guest>
+          }
+        />
+        <Route
+          path="/login"
+          element={
+            <Guest>
+              <Login />
+            </Guest>
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            <Guest>
+              <Register />
+            </Guest>
+          }
+        />
+        <Route
+          path="/forgot"
+          element={
+            <Guest>
+              <Forgot />
+            </Guest>
+          }
+        />
+        <Route path="/reset-password/:token" element={<Reset />} />
+        <Route
+          path="/app"
+          element={
+            <Protected>
+              <WorkspaceProvider>
+                <AppLayout />
+              </WorkspaceProvider>
+            </Protected>
+          }
+        >
+          <Route index element={<Dashboard />} />
+          <Route path="documents" element={<Documents />} />
+          <Route path="chat" element={<Chat />} />
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 };
 

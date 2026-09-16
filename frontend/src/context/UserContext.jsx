@@ -1,131 +1,74 @@
 import api from "../utils/api";
 import { createContext, useContext, useEffect, useState } from "react";
 import { toast } from "react-toastify";
-const UserContext = createContext(); 
+
+const UserContext = createContext();
 
 export const UserProvider = ({ children }) => {
-  const [user, setUser] = useState([]);
+  const [user, setUser] = useState(null);
   const [isAuth, setIsAuth] = useState(false);
   const [btnLoading, setBtnLoading] = useState(false);
-
-  const getDashboardPath = (role) => {
-    switch (role) {
-      case "role1":
-        return "/role1";
-      case "role2":
-        return "/role2";
-      case "role3":
-        return "/role3";
-      case "role4":
-        return "/role4";
-      default:
-        return "/";
-    }
-  };
+  const [loading, setLoading] = useState(true);
 
   async function loginUser(email, password, navigate) {
     setBtnLoading(true);
     try {
-      const { data } = await api.post("/api/user/login", {
+      const { data } = await api.post("/api/auth/login", { email, password });
+      toast.success(data.message);
+      setUser(data.user);
+      setIsAuth(true);
+      navigate("/app");
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Login failed");
+    } finally {
+      setBtnLoading(false);
+    }
+  }
+
+  async function registerUser(name, email, password, navigate) {
+    setBtnLoading(true);
+    try {
+      const { data } = await api.post("/api/auth/register", {
+        name,
         email,
         password,
       });
       toast.success(data.message);
       setUser(data.user);
       setIsAuth(true);
-      setBtnLoading(false);
-      navigate(getDashboardPath(data.user.role));
-    } catch (error) {
-      toast.error(error?.response?.data?.message || "Login failed");
-      setBtnLoading(false);
-    }
-  }
-
-
-
-  async function forgotUser(email,navigate) {
-    setBtnLoading(true);
-    try {
-      const {data} = await api.post("/api/user/forget", {email});
-      toast.success(data.message);
-      setBtnLoading(false);
-      const token =data.token;
-      navigate("/reset-password/"+token);
-    
-  } catch (error) {
-    toast.error(error.response.data.message);
-    setBtnLoading(false);
-  }
-  }
-
-  async function resetUser(token,otp,password,navigate) {
-    setBtnLoading(true);
-    try {
-      const {data} = await api.post("/api/user/reset-password/"+token, {otp,password});
-      toast.success(data.message);
-      setBtnLoading(false);
-      navigate("/login");
-    
-  } catch (error) {
-    toast.error(error.response.data.message);
-    setBtnLoading(false);
-  }
-  }
-
-  async function registerUser(name, email, password, role, navigate) {
-    setBtnLoading(true);
-    try {
-      const { data } = await api.post("/api/user/register", {
-        name,
-        email,
-        password,
-        role,
-      });
-      toast.success(data.message);
-      console.log(data);
-      const token=data.token
-      setBtnLoading(false);
-      navigate("/verify/"+token);
-      
+      navigate("/app");
     } catch (error) {
       toast.error(error?.response?.data?.message || "Registration failed");
+    } finally {
       setBtnLoading(false);
     }
   }
 
-  async function verify(token, otp, navigate) {
+  async function forgotUser(email, navigate) {
     setBtnLoading(true);
     try {
-      const { data } = await api.post(`/api/user/verifyOtp/${token}`, {
-        otp,
-      });
-
-      const role = data?.user?.role;
-
-      // Registration completed.
+      const { data } = await api.post("/api/auth/forgot", { email });
       toast.success(data.message);
-
-      if (role === "role1" || role === "role4") {
-        // Auto-login for role1 and role4 after verification.
-        setUser(data.user);
-        setIsAuth(true);
-        setBtnLoading(false);
-        navigate(getDashboardPath(role));
-        return;
-      }
-
-      // If role2 or role3, explicitly inform about admin verification.
-      if (role === "role2" || role === "role3") {
-        toast.info(
-          "Your account is pending admin verification. You cannot login until an admin approves your account."
-        );
-      }
-
+      navigate("/reset-password/" + data.token);
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Request failed");
+    } finally {
       setBtnLoading(false);
-      // Redirect to login for roles that are not auto-logged-in.
+    }
+  }
+
+  async function resetUser(token, otp, password, navigate) {
+    setBtnLoading(true);
+    try {
+      const { data } = await api.post("/api/auth/reset-password/" + token, {
+        otp,
+        password,
+      });
+      toast.success(data.message);
       navigate("/login");
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Verification failed");
+      toast.error(error?.response?.data?.message || "Reset failed");
+    } finally {
       setBtnLoading(false);
     }
   }
@@ -133,31 +76,30 @@ export const UserProvider = ({ children }) => {
   async function logoutUser(navigate) {
     setBtnLoading(true);
     try {
-      await api.get("/api/user/logout");
-      setUser([]);
+      await api.post("/api/auth/logout");
+      setUser(null);
       setIsAuth(false);
+      localStorage.removeItem("currentWorkspaceId");
       toast.success("Logged out successfully");
-      setBtnLoading(false);
       navigate("/login");
     } catch (error) {
       toast.error(error?.response?.data?.message || "Logout failed");
+    } finally {
       setBtnLoading(false);
     }
   }
 
-  const [loading, setLoading] = useState(true);
   async function fetchUser() {
     try {
-      const { data } = await api.get("/api/user/me");
-      if (data && typeof data === "object" && data._id) {
+      const { data } = await api.get("/api/auth/me");
+      if (data && data._id) {
         setUser(data);
         setIsAuth(true);
       } else {
         setUser(null);
         setIsAuth(false);
       }
-    } catch (error) {
-      console.log("Error fetching user session:", error);
+    } catch {
       setUser(null);
       setIsAuth(false);
     } finally {
@@ -167,10 +109,8 @@ export const UserProvider = ({ children }) => {
 
   useEffect(() => {
     fetchUser();
-    return () => {};
   }, []);
 
-  
   return (
     <UserContext.Provider
       value={{
@@ -182,9 +122,8 @@ export const UserProvider = ({ children }) => {
         registerUser,
         setIsAuth,
         setUser,
-        forgotUser, 
+        forgotUser,
         resetUser,
-        verify,
         fetchUser,
         logoutUser,
       }}
@@ -194,5 +133,4 @@ export const UserProvider = ({ children }) => {
   );
 };
 
-// Custom hook to access the context
 export const UserData = () => useContext(UserContext);

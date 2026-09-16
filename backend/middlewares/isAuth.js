@@ -1,43 +1,32 @@
 import jwt from "jsonwebtoken";
-import { User } from "../models/userModel.js";
+import { User } from "../models/User.js";
+import { jwtSecret } from "../utils/generateToken.js";
 
 export const isAuth = async (req, res, next) => {
   try {
-    const token = req.cookies.token;
-    if (!token)
-      return res.status(403).json({
-        message: "Please Login",
-      });
+    const header = req.headers.authorization;
+    const bearer =
+      header && header.startsWith("Bearer ") ? header.slice(7) : null;
+    const token = req.cookies?.token || bearer;
 
-    const decodedData = jwt.verify(token, process.env.JWT_SEC);
-
-    if (!decodedData)
-      return res.status(403).json({
-        message: "token expired",
-      });
-
-    req.user = await User.findById(decodedData.id);
-
-    next();
-  } catch (error) {
-    res.status(500).json({
-      message: "Please Login",
-    });
-  }
-};
-
-// Admin-only guard: allows only role4 (admin) to proceed.
-export const isAdmin = (req, res, next) => {
-  try {
-    if (!req.user || req.user.role !== "role4") {
-      return res.status(403).json({
-        message: "Access denied. Admin privileges required.",
-      });
+    if (!token) {
+      return res.status(401).json({ message: "Please login" });
     }
+
+    const decoded = jwt.verify(token, jwtSecret());
+    const user = await User.findById(decoded.id);
+
+    if (!user) {
+      return res.status(401).json({ message: "Please login" });
+    }
+
+    if (user.status === "suspended") {
+      return res.status(403).json({ message: "Account is suspended" });
+    }
+
+    req.user = user;
     next();
   } catch (error) {
-    return res.status(500).json({
-      message: "Access denied. Admin privileges required.",
-    });
+    return res.status(401).json({ message: "Please login" });
   }
 };

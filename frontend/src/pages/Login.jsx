@@ -4,7 +4,6 @@ import { useNavigate, Link } from 'react-router-dom'
 import { LoadingAnimation } from '../components/Loading'
 import { motion } from 'framer-motion'
 import { FaEnvelope, FaLock, FaEye, FaEyeSlash } from 'react-icons/fa'
-import { FaGoogle } from "react-icons/fa";
 
 
 
@@ -76,7 +75,7 @@ const Login = () => {
             >
 
                 <motion.h2 className='text-xl font-semibold text-center mb-2 text-[#50c878]' variants={itemVariants}>
-                    DMS
+                    Smart Cloud DMS
                 </motion.h2>
 
                 <motion.h2 className='text-2xl font-bold text-white text-center mb-6' variants={itemVariants}>

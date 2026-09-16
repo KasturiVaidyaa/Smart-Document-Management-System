@@ -1,16 +1,15 @@
 import mongoose from "mongoose";
 
-const connectDb=async()=>{
-    try{
-        await mongoose.connect(process.env.MONGO_URL,{
-            dbName : "smart_document_management_system",
-        });
+const connectDb = async () => {
+  const uri = process.env.MONGO_URI || process.env.MONGO_URL;
+  if (!uri) {
+    throw new Error("MONGO_URI (or MONGO_URL) is not set");
+  }
 
-        console.log("connected")
-
-    }catch(error){
-        console.log(error)
-    }
+  await mongoose.connect(uri, {
+    dbName: process.env.MONGO_DB_NAME || "smart_cloud_dms",
+  });
+  console.log("MongoDB connected");
 };
 
 export default connectDb;
