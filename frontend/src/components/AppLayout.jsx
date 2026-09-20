@@ -79,6 +79,11 @@ const AppLayout = () => {
             <Link className="block rounded-md px-3 py-2 hover:bg-zinc-800" to="/app/chat">
               Chat
             </Link>
+            {(current?.isOwner || current?.permissions?.includes("sharing.manage")) && (
+              <Link className="block rounded-md px-3 py-2 hover:bg-zinc-800" to="/app/access-requests">
+                Access Requests
+              </Link>
+            )}
             {!isPersonal && (
               <span className="block rounded-md px-3 py-2 text-zinc-500">
                 Members (soon)

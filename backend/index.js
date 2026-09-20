@@ -6,6 +6,7 @@ import connectDb from "./database/db.js";
 import "./models/index.js";
 import authRoutes from "./routes/authRoutes.js";
 import workspaceRoutes from "./routes/workspaceRoutes.js";
+import shareRoutes from "./routes/shareRoutes.js";
 import { requeueStuckJobs } from "./services/aiJobs.js";
 
 const port = process.env.PORT || 5005;
@@ -40,6 +41,7 @@ app.get("/api/health", (_req, res) => {
 
 app.use("/api/auth", authRoutes);
 app.use("/api/workspaces", workspaceRoutes);
+app.use("/api/share", shareRoutes);
 
 connectDb().then(() => {
   app.listen(port, () => {

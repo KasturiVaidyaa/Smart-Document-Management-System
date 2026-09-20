@@ -1,10 +1,11 @@
 import express from "express";
 import { isAuth } from "../middlewares/isAuth.js";
-import { requireWorkspace } from "../middlewares/requireWorkspace.js";
+import { requireWorkspace, requirePermission } from "../middlewares/requireWorkspace.js";
 import {
   createOrgWorkspace,
   getWorkspace,
   listWorkspaces,
+  listWorkspaceMembers,
 } from "../controllers/workspaceController.js";
 import {
   bulkMoveDocuments,
@@ -39,6 +40,21 @@ import {
 } from "../controllers/chatController.js";
 import { searchDocuments } from "../controllers/searchController.js";
 import uploadFile from "../middlewares/multer.js";
+import {
+  createPermission,
+  listDocumentPermissions,
+  deletePermission,
+} from "../controllers/permissionController.js";
+import {
+  createShareLink,
+  listShareLinks,
+  revokeShareLink,
+} from "../controllers/shareLinkController.js";
+import {
+  createAccessRequest,
+  listAccessRequests,
+  resolveAccessRequest,
+} from "../controllers/accessRequestController.js";
 
 const router = express.Router();
 
@@ -139,6 +155,66 @@ router.delete(
   deleteChatSession
 );
 router.post("/:workspaceId/chat", requireWorkspace, sendChatMessage);
+
+// Permissions (ACL)
+router.post(
+  "/:workspaceId/permissions",
+  requireWorkspace,
+  requirePermission("sharing.manage"),
+  createPermission
+);
+router.get(
+  "/:workspaceId/documents/:documentId/permissions",
+  requireWorkspace,
+  listDocumentPermissions
+);
+router.delete(
+  "/:workspaceId/permissions/:grantId",
+  requireWorkspace,
+  requirePermission("sharing.manage"),
+  deletePermission
+);
+
+// Share Links (authenticated management)
+router.post(
+  "/:workspaceId/documents/:documentId/links",
+  requireWorkspace,
+  requirePermission("sharing.manage"),
+  createShareLink
+);
+router.get(
+  "/:workspaceId/documents/:documentId/links",
+  requireWorkspace,
+  listShareLinks
+);
+router.delete(
+  "/:workspaceId/links/:linkId",
+  requireWorkspace,
+  requirePermission("sharing.manage"),
+  revokeShareLink
+);
+
+// Access Requests
+router.post(
+  "/:workspaceId/documents/:documentId/access-requests",
+  requireWorkspace,
+  createAccessRequest
+);
+router.get(
+  "/:workspaceId/access-requests",
+  requireWorkspace,
+  requirePermission("sharing.manage"),
+  listAccessRequests
+);
+router.patch(
+  "/:workspaceId/access-requests/:requestId",
+  requireWorkspace,
+  requirePermission("sharing.manage"),
+  resolveAccessRequest
+);
+
+// Workspace Members
+router.get("/:workspaceId/members", requireWorkspace, listWorkspaceMembers);
 
 // Workspace detail
 router.get("/:workspaceId", requireWorkspace, getWorkspace);

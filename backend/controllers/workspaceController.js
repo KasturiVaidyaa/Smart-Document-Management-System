@@ -79,3 +79,33 @@ export const getWorkspace = TryCatch(async (req, res) => {
     serializeMembership(req.membership, req.workspace, req.user._id)
   );
 });
+
+/**
+ * GET /api/workspaces/:workspaceId/members
+ *
+ * List workspace members with their names and emails.
+ * Used by the permissions modal for user selection.
+ */
+export const listWorkspaceMembers = TryCatch(async (req, res) => {
+  const members = await WorkspaceMember.find({
+    workspaceId: req.workspace._id,
+    status: "active",
+  })
+    .populate("userId", "name email avatarUrl")
+    .populate("roleIds", "name isOwner")
+    .populate("departmentIds", "name");
+
+  const result = members
+    .filter((m) => m.userId)
+    .map((m) => ({
+      _id: m._id,
+      userId: m.userId._id,
+      name: m.userId.name,
+      email: m.userId.email,
+      avatarUrl: m.userId.avatarUrl,
+      roles: (m.roleIds || []).map((r) => ({ _id: r._id, name: r.name, isOwner: r.isOwner })),
+      departments: (m.departmentIds || []).map((d) => ({ _id: d._id, name: d.name })),
+    }));
+
+  res.json({ members: result });
+});

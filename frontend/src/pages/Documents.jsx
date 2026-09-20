@@ -23,6 +23,8 @@ import {
   X,
   Eye,
   Download,
+  Shield,
+  Link2,
 } from "lucide-react";
 import api from "../utils/api";
 import { useWorkspace } from "../context/WorkspaceContext";
@@ -35,6 +37,8 @@ import {
 } from "../components/documents/FolderModals";
 import { VersionHistoryModal } from "../components/documents/VersionHistoryModal";
 import { BulkActionBar } from "../components/documents/BulkActionBar";
+import { PermissionsModal } from "../components/documents/PermissionsModal";
+import { ShareLinkModal } from "../components/documents/ShareLinkModal";
 
 const formatBytes = (bytes = 0) => {
   if (!bytes) return "0 B";
@@ -91,6 +95,10 @@ const Documents = () => {
   const [folderToDelete, setFolderToDelete] = useState(null);
   const [docsToMove, setDocsToMove] = useState([]);
   const [versionDoc, setVersionDoc] = useState(null);
+
+  // Permissions & Share Link Modals
+  const [permissionsDoc, setPermissionsDoc] = useState(null);
+  const [shareLinkDoc, setShareLinkDoc] = useState(null);
 
   // Permanent Delete Confirmation Modal
   const [permDeleteConfirmDocs, setPermDeleteConfirmDocs] = useState(null);
@@ -735,6 +743,24 @@ const Documents = () => {
                             </Link>
 
                             <button
+                              title="Share link"
+                              type="button"
+                              onClick={() => setShareLinkDoc(doc)}
+                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                            >
+                              <Link2 className="h-3.5 w-3.5 text-emerald-400" />
+                            </button>
+
+                            <button
+                              title="Permissions"
+                              type="button"
+                              onClick={() => setPermissionsDoc(doc)}
+                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                            >
+                              <Shield className="h-3.5 w-3.5 text-amber-400" />
+                            </button>
+
+                            <button
                               title="Move document"
                               type="button"
                               onClick={() => setDocsToMove([doc])}
@@ -878,6 +904,20 @@ const Documents = () => {
         document={versionDoc}
         workspaceId={currentWorkspaceId}
         onVersionUpdated={loadDocuments}
+      />
+
+      <PermissionsModal
+        isOpen={Boolean(permissionsDoc)}
+        onClose={() => setPermissionsDoc(null)}
+        document={permissionsDoc}
+        workspaceId={currentWorkspaceId}
+      />
+
+      <ShareLinkModal
+        isOpen={Boolean(shareLinkDoc)}
+        onClose={() => setShareLinkDoc(null)}
+        document={shareLinkDoc}
+        workspaceId={currentWorkspaceId}
       />
 
       {/* Permanent Delete Confirmation Dialog */}

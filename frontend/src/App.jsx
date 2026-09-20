@@ -11,6 +11,8 @@ import AppLayout from "./components/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Documents from "./pages/Documents";
 import Chat from "./pages/Chat";
+import ShareLinkAccess from "./pages/ShareLinkAccess";
+import AccessRequestsPanel from "./components/documents/AccessRequestsPanel";
 
 const Protected = ({ children }) => {
   const { isAuth, loading } = UserData();
@@ -67,6 +69,7 @@ const App = () => {
           }
         />
         <Route path="/reset-password/:token" element={<Reset />} />
+        <Route path="/share/:token" element={<ShareLinkAccess />} />
         <Route
           path="/app"
           element={
@@ -80,6 +83,7 @@ const App = () => {
           <Route index element={<Dashboard />} />
           <Route path="documents" element={<Documents />} />
           <Route path="chat" element={<Chat />} />
+          <Route path="access-requests" element={<AccessRequestsPanel />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
