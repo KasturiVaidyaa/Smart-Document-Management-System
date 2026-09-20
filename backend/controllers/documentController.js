@@ -18,6 +18,33 @@ import { enqueueProcessJob } from "../services/aiJobs.js";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
+export function resolveMimeType(filename = "", mimeType = "") {
+  if (mimeType && mimeType !== "application/octet-stream") {
+    return mimeType;
+  }
+  const ext = filename.split(".").pop()?.toLowerCase();
+  const map = {
+    pdf: "application/pdf",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+    txt: "text/plain",
+    html: "text/html",
+    json: "application/json",
+    csv: "text/csv",
+    doc: "application/msword",
+    docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ppt: "application/vnd.ms-powerpoint",
+    pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    xls: "application/vnd.ms-excel",
+    xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  };
+  return map[ext] || mimeType || "application/octet-stream";
+}
+
 export const serializeDocument = (doc) => {
   const version =
     doc.currentVersionId && typeof doc.currentVersionId === "object"
@@ -101,12 +128,105 @@ export const createDocument = TryCatch(async (req, res) => {
   const extension = originalName.includes(".")
     ? originalName.split(".").pop().toLowerCase()
     : "";
+  const resolvedMime = resolveMimeType(originalName, file.mimetype);
 
+  // Check if a document with the same filename already exists in the same folder and workspace
+  const existingDoc = await Document.findOne({
+    workspaceId: req.workspace._id,
+    folderId: assignedFolderId,
+    name: originalName,
+    status: "active",
+  });
+
+  if (existingDoc) {
+    // AUTOMATIC VERSIONING: Document with same filename exists in same folder -> create next version
+    const lastVersion = await DocumentVersion.findOne({
+      documentId: existingDoc._id,
+    }).sort({ versionNumber: -1 });
+
+    const nextVersionNumber = (lastVersion?.versionNumber || existingDoc.versionCount || 0) + 1;
+    const key = s3Key({
+      workspaceId: req.workspace._id,
+      documentId: existingDoc._id,
+      versionNumber: nextVersionNumber,
+      filename: originalName,
+    });
+
+    try {
+      await putObject({
+        key,
+        body: file.buffer,
+        contentType: resolvedMime,
+      });
+
+      let etag;
+      try {
+        const head = await headObject(key);
+        etag = head.ETag;
+      } catch {
+        etag = undefined;
+      }
+
+      const version = await DocumentVersion.create({
+        documentId: existingDoc._id,
+        workspaceId: req.workspace._id,
+        versionNumber: nextVersionNumber,
+        filename: originalName,
+        s3Bucket,
+        s3Key: key,
+        s3ETag: etag,
+        sizeBytes: file.size,
+        mimeType: resolvedMime,
+        uploadedBy: req.user._id,
+        changeNote: `Uploaded version ${nextVersionNumber}`,
+        processing: {
+          extract: "pending",
+          embed: "pending",
+          classify: "pending",
+        },
+      });
+
+      existingDoc.currentVersionId = version._id;
+      existingDoc.versionCount = nextVersionNumber;
+      existingDoc.sizeBytes = file.size;
+      existingDoc.mimeType = resolvedMime;
+      existingDoc.extension = extension;
+      existingDoc.status = "active";
+      existingDoc.updatedBy = req.user._id;
+      await existingDoc.save();
+
+      await Workspace.updateOne(
+        { _id: req.workspace._id },
+        { $inc: { storageUsedBytes: file.size } }
+      );
+
+      enqueueProcessJob({
+        workspace: req.workspace,
+        document: existingDoc,
+        version,
+      }).catch((err) => console.error("Failed to enqueue AI job:", err.message));
+
+      return res.status(200).json({
+        message: `Version ${nextVersionNumber} uploaded for ${originalName}`,
+        document: serializeDocument(existingDoc),
+        version,
+        isNewVersion: true,
+      });
+    } catch (error) {
+      const message =
+        error.name === "AccessDenied" || error.Code === "AccessDenied"
+          ? "S3 access denied. Check IAM permissions on this bucket."
+          : error.message;
+      return res.status(error.statusCode || 500).json({ message });
+    }
+  }
+
+  // New document creation
   const document = await Document.create({
     workspaceId: req.workspace._id,
     folderId: assignedFolderId,
     name: originalName,
-    mimeType: file.mimetype,
+    mimeType: resolvedMime,
     extension,
     createdBy: req.user._id,
     updatedBy: req.user._id,
@@ -124,7 +244,7 @@ export const createDocument = TryCatch(async (req, res) => {
     await putObject({
       key,
       body: file.buffer,
-      contentType: file.mimetype,
+      contentType: resolvedMime,
     });
 
     let etag;
@@ -139,12 +259,14 @@ export const createDocument = TryCatch(async (req, res) => {
       documentId: document._id,
       workspaceId: req.workspace._id,
       versionNumber,
+      filename: originalName,
       s3Bucket,
       s3Key: key,
       s3ETag: etag,
       sizeBytes: file.size,
-      mimeType: file.mimetype,
+      mimeType: resolvedMime,
       uploadedBy: req.user._id,
+      changeNote: "Initial upload",
       processing: {
         extract: "pending",
         embed: "pending",
@@ -201,12 +323,25 @@ export const getDocumentFile = TryCatch(async (req, res) => {
   document.lastAccessedAt = new Date();
   await document.save();
 
-  const url = await getDownloadUrl(version.s3Key, { filename: document.name });
+  const disposition = req.query.disposition === "attachment" ? "attachment" : "inline";
+  const filename = version.filename || document.name;
+  const resolvedMime = resolveMimeType(
+    filename,
+    version.mimeType || document.mimeType
+  );
+
+  const url = await getDownloadUrl(version.s3Key, {
+    filename,
+    contentType: resolvedMime,
+    disposition,
+  });
+
   res.json({
     url,
-    name: document.name,
-    mimeType: document.mimeType || version.mimeType,
-    sizeBytes: document.sizeBytes,
+    name: filename,
+    mimeType: resolvedMime,
+    sizeBytes: version.sizeBytes || document.sizeBytes,
+    disposition,
   });
 });
 
@@ -587,6 +722,7 @@ export const createDocumentVersion = TryCatch(async (req, res) => {
 
   const nextVersionNumber = (lastVersion?.versionNumber || document.versionCount || 0) + 1;
   const originalName = file.originalname || document.name;
+  const resolvedMime = resolveMimeType(originalName, file.mimetype);
   const key = s3Key({
     workspaceId: req.workspace._id,
     documentId: document._id,
@@ -597,7 +733,7 @@ export const createDocumentVersion = TryCatch(async (req, res) => {
   await putObject({
     key,
     body: file.buffer,
-    contentType: file.mimetype,
+    contentType: resolvedMime,
   });
 
   let etag;
@@ -612,11 +748,12 @@ export const createDocumentVersion = TryCatch(async (req, res) => {
     documentId: document._id,
     workspaceId: req.workspace._id,
     versionNumber: nextVersionNumber,
+    filename: originalName,
     s3Bucket,
     s3Key: key,
     s3ETag: etag,
     sizeBytes: file.size,
-    mimeType: file.mimetype,
+    mimeType: resolvedMime,
     uploadedBy: req.user._id,
     changeNote: req.body.changeNote?.trim() || "",
     processing: {
@@ -629,7 +766,7 @@ export const createDocumentVersion = TryCatch(async (req, res) => {
   document.currentVersionId = version._id;
   document.versionCount = nextVersionNumber;
   document.sizeBytes = file.size;
-  document.mimeType = file.mimetype;
+  document.mimeType = resolvedMime;
   document.updatedBy = req.user._id;
   await document.save();
 
@@ -705,16 +842,23 @@ export const getDocumentVersionFile = TryCatch(async (req, res) => {
     return res.status(404).json({ message: "Version file not found in storage" });
   }
 
+  const disposition = req.query.disposition === "attachment" ? "attachment" : "inline";
+  const versionName = version.filename || document.name;
+  const resolvedMime = resolveMimeType(versionName, version.mimeType || document.mimeType);
+
   const url = await getDownloadUrl(version.s3Key, {
-    filename: `v${version.versionNumber}_${document.name}`,
+    filename: versionName,
+    contentType: resolvedMime,
+    disposition,
   });
 
   res.json({
     url,
-    name: document.name,
-    mimeType: version.mimeType || document.mimeType,
+    name: versionName,
+    mimeType: resolvedMime,
     sizeBytes: version.sizeBytes,
     versionNumber: version.versionNumber,
+    disposition,
   });
 });
 
@@ -754,11 +898,12 @@ export const revertDocumentVersion = TryCatch(async (req, res) => {
   }).sort({ versionNumber: -1 });
 
   const nextVersionNumber = (lastVersion?.versionNumber || document.versionCount || 0) + 1;
+  const targetFilename = targetVersion.filename || document.name;
   const newKey = s3Key({
     workspaceId: req.workspace._id,
     documentId: document._id,
     versionNumber: nextVersionNumber,
-    filename: document.name,
+    filename: targetFilename,
   });
 
   await copyObject({
@@ -770,6 +915,7 @@ export const revertDocumentVersion = TryCatch(async (req, res) => {
     documentId: document._id,
     workspaceId: req.workspace._id,
     versionNumber: nextVersionNumber,
+    filename: targetFilename,
     s3Bucket,
     s3Key: newKey,
     s3ETag: targetVersion.s3ETag,
@@ -778,7 +924,7 @@ export const revertDocumentVersion = TryCatch(async (req, res) => {
     uploadedBy: req.user._id,
     changeNote:
       req.body.changeNote?.trim() ||
-      `Reverted to version ${targetVersion.versionNumber}`,
+      `Reverted to version ${targetVersion.versionNumber} (${targetFilename})`,
     processing: {
       extract: targetVersion.processing?.extract || "pending",
       embed: targetVersion.processing?.embed || "pending",

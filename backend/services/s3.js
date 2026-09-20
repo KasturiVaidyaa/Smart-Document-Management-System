@@ -68,14 +68,19 @@ export async function headObject(key) {
   );
 }
 
-export async function getDownloadUrl(key, { filename, expiresIn = 300 } = {}) {
+export async function getDownloadUrl(
+  key,
+  { filename, contentType, disposition = "inline", expiresIn = 300 } = {}
+) {
   assertS3Configured();
+  const safeName = filename ? safeFilename(filename) : undefined;
   const command = new GetObjectCommand({
     Bucket: s3Bucket,
     Key: key,
-    ResponseContentDisposition: filename
-      ? `inline; filename="${safeFilename(filename)}"`
-      : undefined,
+    ResponseContentType: contentType || undefined,
+    ResponseContentDisposition: safeName
+      ? `${disposition}; filename="${safeName}"`
+      : disposition,
   });
   return getSignedUrl(s3, command, { expiresIn });
 }

@@ -179,10 +179,16 @@ const Documents = () => {
 
     setUploading(true);
     try {
-      await api.post(`/api/workspaces/${currentWorkspaceId}/documents`, form);
-      toast.success(
-        "File uploaded. AI processing starts in the background for PDF/DOCX/PPTX/TXT."
-      );
+      const { data } = await api.post(`/api/workspaces/${currentWorkspaceId}/documents`, form);
+      if (data.isNewVersion) {
+        toast.success(
+          data.message || "New version uploaded successfully"
+        );
+      } else {
+        toast.success(
+          "File uploaded. AI processing starts in the background for PDF/DOCX/PPTX/TXT."
+        );
+      }
       await loadDocuments();
       await fetchWorkspaces();
     } catch (error) {
@@ -192,19 +198,38 @@ const Documents = () => {
     }
   };
 
-  // Open Preview
+  // Open Preview in new browser tab
   const openDocument = async (doc) => {
     try {
       const { data } = await api.get(
-        `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/file`
+        `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/file`,
+        { params: { disposition: "inline" } }
       );
-      if (isPreviewable(data.mimeType)) {
-        setPreview(data);
-      } else {
+      if (data.url) {
         window.open(data.url, "_blank", "noopener,noreferrer");
       }
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Could not open file");
+      toast.error(error?.response?.data?.message || "Could not open file preview");
+    }
+  };
+
+  // Explicit Download
+  const downloadDocument = async (doc) => {
+    try {
+      const { data } = await api.get(
+        `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/file`,
+        { params: { disposition: "attachment" } }
+      );
+      if (data.url) {
+        const link = window.document.createElement("a");
+        link.href = data.url;
+        link.setAttribute("download", data.name || doc.name);
+        window.document.body.appendChild(link);
+        link.click();
+        window.document.body.removeChild(link);
+      }
+    } catch (error) {
+      toast.error(error?.response?.data?.message || "Could not download file");
     }
   };
 
@@ -671,13 +696,33 @@ const Documents = () => {
                         {activeTab === "files" ? (
                           <>
                             <button
-                              title="Preview or open document"
+                              title="Preview document in new tab"
                               type="button"
                               onClick={() => openDocument(doc)}
                               className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
                             >
-                              <Eye className="h-3.5 w-3.5" />
+                              <Eye className="h-3.5 w-3.5 text-blue-400" />
                               <span className="hidden sm:inline">Open</span>
+                            </button>
+
+                            <button
+                              title="Download document"
+                              type="button"
+                              onClick={() => downloadDocument(doc)}
+                              className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                            >
+                              <Download className="h-3.5 w-3.5 text-zinc-300" />
+                              <span className="hidden sm:inline">Download</span>
+                            </button>
+
+                            <button
+                              title="Upload new version"
+                              type="button"
+                              onClick={() => setVersionDoc(doc)}
+                              className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                            >
+                              <Upload className="h-3.5 w-3.5 text-emerald-400" />
+                              <span className="hidden md:inline">New Version</span>
                             </button>
 
                             <Link

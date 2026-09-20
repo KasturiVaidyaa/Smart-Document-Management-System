@@ -19,6 +19,7 @@ const documentVersionSchema = new mongoose.Schema(
       required: true,
     },
     versionNumber: { type: Number, required: true },
+    filename: String,
     s3Bucket: String,
     s3Key: String,
     s3ETag: String,

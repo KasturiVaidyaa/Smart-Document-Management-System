@@ -9,6 +9,7 @@ import {
   Clock,
   AlertCircle,
   FileText,
+  Eye,
 } from "lucide-react";
 import { toast } from "react-toastify";
 import api from "../../utils/api";
@@ -43,7 +44,7 @@ export const VersionHistoryModal = ({
   const [currentVersionId, setCurrentVersionId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [revertingId, setRevertingId] = useState(null);
+  const [restoringId, setRestoringId] = useState(null);
 
   // Upload new version form
   const [newVersionFile, setNewVersionFile] = useState(null);
@@ -106,35 +107,60 @@ export const VersionHistoryModal = ({
     }
   };
 
-  const handleDownloadVersion = async (version) => {
+  const handleOpenVersion = async (version) => {
     try {
       const { data } = await api.get(
-        `/api/workspaces/${workspaceId}/documents/${document._id}/versions/${version._id}/file`
+        `/api/workspaces/${workspaceId}/documents/${document._id}/versions/${version._id}/file`,
+        { params: { disposition: "inline" } }
       );
       if (data.url) {
         window.open(data.url, "_blank", "noopener,noreferrer");
       }
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Failed to get version file");
+      toast.error(err?.response?.data?.message || "Failed to open version preview");
     }
   };
 
-  const handleRevert = async (version) => {
-    const confirmMessage = `Revert document to Version ${version.versionNumber}? This will create a new current version referencing Version ${version.versionNumber}, preserving full history.`;
+  const handleDownloadVersion = async (version) => {
+    try {
+      const { data } = await api.get(
+        `/api/workspaces/${workspaceId}/documents/${document._id}/versions/${version._id}/file`,
+        { params: { disposition: "attachment" } }
+      );
+      if (data.url) {
+        const link = window.document.createElement("a");
+        link.href = data.url;
+        link.setAttribute(
+          "download",
+          data.name || version.filename || document.name
+        );
+        window.document.body.appendChild(link);
+        link.click();
+        window.document.body.removeChild(link);
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Failed to download version");
+    }
+  };
+
+  const handleRestore = async (version) => {
+    const filename = version.filename || document.name;
+    const confirmMessage = `Restore Version ${version.versionNumber} (${filename})? This will create a NEW version and preserve full history.`;
     if (!window.confirm(confirmMessage)) return;
 
-    setRevertingId(version._id);
+    setRestoringId(version._id);
     try {
       await api.post(
-        `/api/workspaces/${workspaceId}/documents/${document._id}/versions/${version._id}/revert`
+        `/api/workspaces/${workspaceId}/documents/${document._id}/versions/${version._id}/revert`,
+        { changeNote: `Restored from version ${version.versionNumber} (${filename})` }
       );
-      toast.success(`Reverted to version ${version.versionNumber}`);
+      toast.success(`Restored Version ${version.versionNumber} as new version`);
       await loadVersions();
       if (onVersionUpdated) onVersionUpdated();
     } catch (err) {
-      toast.error(err?.response?.data?.message || "Revert failed");
+      toast.error(err?.response?.data?.message || "Restore failed");
     } finally {
-      setRevertingId(null);
+      setRestoringId(null);
     }
   };
 
@@ -228,16 +254,22 @@ export const VersionHistoryModal = ({
                           : "hover:bg-zinc-900/50"
                       }`}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                      <div className="space-y-1.5 min-w-0 flex-1">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-sm font-semibold text-zinc-100">
-                            Version {ver.versionNumber}
+                            v{ver.versionNumber}
                           </span>
                           {isCurrent && (
                             <span className="rounded-full bg-blue-500/20 px-2 py-0.5 text-[10px] font-semibold text-blue-400 border border-blue-500/30">
-                              Current
+                              Current Version
                             </span>
                           )}
+                          <span
+                            className="text-xs font-medium text-zinc-200 truncate max-w-xs sm:max-w-md"
+                            title={ver.filename || document.name}
+                          >
+                            📄 {ver.filename || document.name}
+                          </span>
                           <span className="text-xs text-zinc-400">
                             · {formatBytes(ver.sizeBytes)}
                           </span>
@@ -249,37 +281,52 @@ export const VersionHistoryModal = ({
                           </p>
                         )}
 
-                        <div className="flex items-center gap-3 text-[11px] text-zinc-500">
+                        <div className="flex items-center gap-2 text-[11px] text-zinc-500 flex-wrap">
                           <span>
-                            By {ver.uploadedBy?.name || "Workspace Member"}
+                            Uploaded by{" "}
+                            <strong className="text-zinc-400 font-normal">
+                              {ver.uploadedBy?.name || "Workspace Member"}
+                            </strong>
                           </span>
                           <span>•</span>
                           <span>{formatDate(ver.createdAt)}</span>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-center">
                         <button
                           type="button"
-                          onClick={() => handleDownloadVersion(ver)}
-                          className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                          title="Open preview in new tab"
+                          onClick={() => handleOpenVersion(ver)}
+                          className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
                         >
-                          <Download className="h-3.5 w-3.5" />
-                          <span>File</span>
+                          <Eye className="h-3.5 w-3.5 text-blue-400" />
+                          <span>Open</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          title="Download version file"
+                          onClick={() => handleDownloadVersion(ver)}
+                          className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                        >
+                          <Download className="h-3.5 w-3.5 text-zinc-300" />
+                          <span>Download</span>
                         </button>
 
                         {!isCurrent && (
                           <button
                             type="button"
-                            disabled={revertingId === ver._id}
-                            onClick={() => handleRevert(ver)}
-                            className="flex items-center gap-1.5 rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-amber-400 hover:bg-amber-950/40 hover:border-amber-500/40 transition-colors disabled:opacity-50"
+                            title="Restore this version as the new current version"
+                            disabled={restoringId === ver._id}
+                            onClick={() => handleRestore(ver)}
+                            className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-amber-400 hover:bg-amber-950/40 hover:border-amber-500/40 transition-colors disabled:opacity-50"
                           >
                             <RotateCcw className="h-3.5 w-3.5" />
                             <span>
-                              {revertingId === ver._id
-                                ? "Reverting..."
-                                : "Revert"}
+                              {restoringId === ver._id
+                                ? "Restoring..."
+                                : "Restore"}
                             </span>
                           </button>
                         )}
