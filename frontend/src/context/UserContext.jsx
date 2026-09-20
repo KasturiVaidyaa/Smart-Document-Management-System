@@ -15,6 +15,9 @@ export const UserProvider = ({ children }) => {
     try {
       const { data } = await api.post("/api/auth/login", { email, password });
       toast.success(data.message);
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
       setUser(data.user);
       setIsAuth(true);
       navigate("/app");
@@ -34,6 +37,9 @@ export const UserProvider = ({ children }) => {
         password,
       });
       toast.success(data.message);
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
       setUser(data.user);
       setIsAuth(true);
       navigate("/app");
@@ -77,9 +83,10 @@ export const UserProvider = ({ children }) => {
     setBtnLoading(true);
     try {
       await api.post("/api/auth/logout");
+      localStorage.removeItem("token");
+      localStorage.removeItem("currentWorkspaceId");
       setUser(null);
       setIsAuth(false);
-      localStorage.removeItem("currentWorkspaceId");
       toast.success("Logged out successfully");
       navigate("/login");
     } catch (error) {

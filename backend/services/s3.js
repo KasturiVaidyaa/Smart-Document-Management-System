@@ -1,4 +1,6 @@
 import {
+  CopyObjectCommand,
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -77,3 +79,25 @@ export async function getDownloadUrl(key, { filename, expiresIn = 300 } = {}) {
   });
   return getSignedUrl(s3, command, { expiresIn });
 }
+
+export async function deleteObject(key) {
+  assertS3Configured();
+  return s3.send(
+    new DeleteObjectCommand({
+      Bucket: s3Bucket,
+      Key: key,
+    })
+  );
+}
+
+export async function copyObject({ sourceKey, targetKey }) {
+  assertS3Configured();
+  return s3.send(
+    new CopyObjectCommand({
+      Bucket: s3Bucket,
+      CopySource: `${s3Bucket}/${sourceKey}`,
+      Key: targetKey,
+    })
+  );
+}
+

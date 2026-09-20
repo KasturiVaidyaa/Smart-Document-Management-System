@@ -64,8 +64,9 @@ export const registerUser = TryCatch(async (req, res) => {
     return newUser;
   });
 
-  generateToken(user, res);
+  const token = generateToken(user, res);
   res.status(201).json({
+    token,
     user: publicUser(user),
     message: "Account created",
   });
@@ -93,8 +94,9 @@ export const loginUser = TryCatch(async (req, res) => {
     return res.status(403).json({ message: "Account is suspended" });
   }
 
-  generateToken(user, res);
+  const token = generateToken(user, res);
   res.json({
+    token,
     user: publicUser(user),
     message: "Logged in",
   });
