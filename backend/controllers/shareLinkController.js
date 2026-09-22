@@ -8,6 +8,7 @@ import { DocumentVersion } from "../models/DocumentVersion.js";
 import { getDownloadUrl } from "../services/s3.js";
 import { resolveMimeType } from "./documentController.js";
 import { LINK_ACTIONS } from "../constants/permissions.js";
+import { logAuditEvent } from "../services/auditService.js";
 
 /**
  * Generate a random share token and its SHA-256 hash.
@@ -80,6 +81,20 @@ export const createShareLink = TryCatch(async (req, res) => {
   // Return the raw token (only time it's ever exposed)
   const clientOrigin = process.env.CLIENT_ORIGIN || process.env.CLIENT_URL || "http://localhost:5173";
   const shareUrl = `${clientOrigin}/share/${token}`;
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "share_link.create",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      linkId: link._id,
+      actions: link.actions,
+      expiresAt: link.expiresAt,
+      hasPassword: !!link.passwordHash,
+    },
+  });
 
   res.status(201).json({
     message: "Share link created",
@@ -158,6 +173,17 @@ export const revokeShareLink = TryCatch(async (req, res) => {
 
   link.revokedAt = new Date();
   await link.save();
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "share_link.revoke",
+    resourceType: "document",
+    resourceId: link.documentId,
+    metadata: {
+      linkId: link._id,
+    },
+  });
 
   res.json({
     message: "Share link revoked",

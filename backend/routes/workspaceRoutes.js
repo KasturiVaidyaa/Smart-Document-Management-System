@@ -88,6 +88,7 @@ import {
   deleteCategory,
   resetDefaultCategories,
 } from "../controllers/categoryController.js";
+import { listAuditLogs } from "../controllers/auditController.js";
 
 const router = express.Router();
 
@@ -381,6 +382,14 @@ router.post(
   requireWorkspace,
   requirePermission("roles.manage"),
   resetDefaultCategories
+);
+
+// Audit Trail (Phase 4 / Member D)
+router.get(
+  "/:workspaceId/audit",
+  requireWorkspace,
+  requirePermission("audit.view"),
+  listAuditLogs
 );
 
 export default router;

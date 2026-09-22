@@ -4,6 +4,8 @@ import { PermissionGrant } from "../models/PermissionGrant.js";
 import { Document } from "../models/Document.js";
 import { Folder } from "../models/Folder.js";
 import { DOCUMENT_ACTIONS } from "../constants/permissions.js";
+import { logAuditEvent } from "../services/auditService.js";
+import { createNotification } from "../services/notificationService.js";
 
 /**
  * POST /api/workspaces/:workspaceId/permissions
@@ -80,6 +82,34 @@ export const createPermission = TryCatch(async (req, res) => {
     existing.grantedBy = req.user._id;
     await existing.save();
 
+    logAuditEvent({
+      workspaceId: req.workspace._id,
+      actor: req.user,
+      action: "permission.update",
+      resourceType,
+      resourceId,
+      metadata: {
+        principalType,
+        principalId: principalType === "workspace" ? null : principalId,
+        actions: existing.actions,
+        expiresAt: existing.expiresAt,
+      },
+    });
+
+    if (principalType === "user" && principalId && String(principalId) !== String(req.user._id)) {
+      createNotification({
+        userId: principalId,
+        workspaceId: req.workspace._id,
+        type: "permission_changed",
+        payload: {
+          resourceType,
+          resourceId,
+          actions: existing.actions,
+          grantedBy: req.user.name || req.user.email || "Workspace admin",
+        },
+      });
+    }
+
     return res.json({
       message: "Permission grant updated",
       grant: existing,
@@ -96,6 +126,34 @@ export const createPermission = TryCatch(async (req, res) => {
     expiresAt: expiresAt ? new Date(expiresAt) : null,
     grantedBy: req.user._id,
   });
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "permission.grant",
+    resourceType,
+    resourceId,
+    metadata: {
+      principalType,
+      principalId: principalType === "workspace" ? null : principalId,
+      actions: grant.actions,
+      expiresAt: grant.expiresAt,
+    },
+  });
+
+  if (principalType === "user" && principalId && String(principalId) !== String(req.user._id)) {
+    createNotification({
+      userId: principalId,
+      workspaceId: req.workspace._id,
+      type: "shared",
+      payload: {
+        resourceType,
+        resourceId,
+        actions: grant.actions,
+        grantedBy: req.user.name || req.user.email || "Workspace admin",
+      },
+    });
+  }
 
   res.status(201).json({
     message: "Permission granted",
@@ -191,6 +249,33 @@ export const deletePermission = TryCatch(async (req, res) => {
   }
 
   await PermissionGrant.deleteOne({ _id: grant._id });
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "permission.revoke",
+    resourceType: grant.resourceType,
+    resourceId: grant.resourceId,
+    metadata: {
+      principalType: grant.principalType,
+      principalId: grant.principalId,
+      actions: grant.actions,
+    },
+  });
+
+  if (grant.principalType === "user" && grant.principalId && String(grant.principalId) !== String(req.user._id)) {
+    createNotification({
+      userId: grant.principalId,
+      workspaceId: req.workspace._id,
+      type: "permission_changed",
+      payload: {
+        resourceType: grant.resourceType,
+        resourceId: grant.resourceId,
+        actions: [],
+        revokedBy: req.user.name || req.user.email || "Workspace admin",
+      },
+    });
+  }
 
   res.json({
     message: "Permission revoked",

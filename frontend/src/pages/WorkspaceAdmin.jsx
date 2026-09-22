@@ -8,6 +8,7 @@ import {
   Layers,
   HardDrive,
   Tag,
+  History,
 } from "lucide-react";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { MembersManagement } from "../components/admin/MembersManagement";
@@ -16,6 +17,7 @@ import { RolesManagement } from "../components/admin/RolesManagement";
 import { WorkspaceSettings } from "../components/admin/WorkspaceSettings";
 import { StorageManagement } from "../components/admin/StorageManagement";
 import { CategoriesManagement } from "../components/admin/CategoriesManagement";
+import { AuditManagement } from "../components/admin/AuditManagement";
 
 const WorkspaceAdmin = () => {
   const { current } = useWorkspace();
@@ -87,6 +89,14 @@ const WorkspaceAdmin = () => {
       badgeColor: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
       enabled: true,
     },
+    {
+      id: "audit",
+      name: "Audit Trail",
+      icon: History,
+      badge: "Audit Active",
+      badgeColor: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+      enabled: true,
+    },
   ];
 
   return (
@@ -146,6 +156,7 @@ const WorkspaceAdmin = () => {
         {activeTab === "settings" && <WorkspaceSettings onNavigateTab={setActiveTab} />}
         {activeTab === "storage" && <StorageManagement />}
         {activeTab === "categories" && <CategoriesManagement />}
+        {activeTab === "audit" && <AuditManagement />}
       </div>
     </div>
   );

@@ -26,6 +26,7 @@ import {
   Shield,
   Link2,
   Building2,
+  Activity,
 } from "lucide-react";
 import api from "../utils/api";
 import { useWorkspace } from "../context/WorkspaceContext";
@@ -40,6 +41,7 @@ import { VersionHistoryModal } from "../components/documents/VersionHistoryModal
 import { BulkActionBar } from "../components/documents/BulkActionBar";
 import { PermissionsModal } from "../components/documents/PermissionsModal";
 import { ShareLinkModal } from "../components/documents/ShareLinkModal";
+import { DocumentTimelineModal } from "../components/documents/DocumentTimelineModal";
 
 const formatBytes = (bytes = 0) => {
   if (!bytes) return "0 B";
@@ -97,9 +99,10 @@ const Documents = () => {
   const [versionDoc, setVersionDoc] = useState(null);
   const [departmentDoc, setDepartmentDoc] = useState(null);
 
-  // Permissions & Share Link Modals
+  // Permissions, Share Link & Timeline Modals
   const [permissionsDoc, setPermissionsDoc] = useState(null);
   const [shareLinkDoc, setShareLinkDoc] = useState(null);
+  const [activityDoc, setActivityDoc] = useState(null);
 
   // Permanent Delete Confirmation Modal
   const [permDeleteConfirmDocs, setPermDeleteConfirmDocs] = useState(null);
@@ -851,6 +854,15 @@ const Documents = () => {
                             </button>
 
                             <button
+                              title="Activity timeline"
+                              type="button"
+                              onClick={() => setActivityDoc(doc)}
+                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                            >
+                              <Activity className="h-3.5 w-3.5 text-blue-400" />
+                            </button>
+
+                            <button
                               title="Permissions"
                               type="button"
                               onClick={() => setPermissionsDoc(doc)}
@@ -1025,6 +1037,13 @@ const Documents = () => {
         isOpen={Boolean(shareLinkDoc)}
         onClose={() => setShareLinkDoc(null)}
         document={shareLinkDoc}
+        workspaceId={currentWorkspaceId}
+      />
+
+      <DocumentTimelineModal
+        isOpen={Boolean(activityDoc)}
+        onClose={() => setActivityDoc(null)}
+        document={activityDoc}
         workspaceId={currentWorkspaceId}
       />
 

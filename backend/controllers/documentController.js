@@ -6,6 +6,7 @@ import { DocumentChunk } from "../models/DocumentChunk.js";
 import { Folder } from "../models/Folder.js";
 import { Workspace } from "../models/Workspace.js";
 import { Department } from "../models/Department.js";
+import { PermissionGrant } from "../models/PermissionGrant.js";
 import { DEFAULT_CATEGORIES } from "../constants/permissions.js";
 import { hasDocumentPermission } from "../middlewares/checkPermission.js";
 import {
@@ -18,6 +19,8 @@ import {
   s3Key,
 } from "../services/s3.js";
 import { enqueueProcessJob } from "../services/aiJobs.js";
+import { logAuditEvent } from "../services/auditService.js";
+import { notifyUsers } from "../services/notificationService.js";
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024;
 
@@ -46,6 +49,42 @@ export function resolveMimeType(filename = "", mimeType = "") {
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   };
   return map[ext] || mimeType || "application/octet-stream";
+}
+
+async function notifyNewVersion({ workspaceId, document, versionNumber, actor }) {
+  try {
+    const grants = await PermissionGrant.find({
+      workspaceId,
+      resourceType: "document",
+      resourceId: document._id,
+      principalType: "user",
+    }).select("principalId");
+
+    const userIds = grants
+      .map((g) => g.principalId?.toString())
+      .filter((id) => id && id !== actor._id?.toString());
+
+    if (document.createdBy && document.createdBy.toString() !== actor._id?.toString()) {
+      userIds.push(document.createdBy.toString());
+    }
+
+    const uniqueUserIds = [...new Set(userIds)];
+    if (uniqueUserIds.length > 0) {
+      await notifyUsers({
+        userIds: uniqueUserIds,
+        workspaceId,
+        type: "new_version",
+        payload: {
+          documentId: document._id,
+          documentName: document.name,
+          versionNumber,
+          uploadedBy: actor.name || actor.email || "A collaborator",
+        },
+      });
+    }
+  } catch (err) {
+    console.error("notifyNewVersion failed:", err.message);
+  }
 }
 
 export const serializeDocument = (doc) => {
@@ -323,6 +362,27 @@ export const createDocument = TryCatch(async (req, res) => {
         version,
       }).catch((err) => console.error("Failed to enqueue AI job:", err.message));
 
+      logAuditEvent({
+        workspaceId: req.workspace._id,
+        actor: req.user,
+        action: "document.version_create",
+        resourceType: "document",
+        resourceId: existingDoc._id,
+        metadata: {
+          name: existingDoc.name,
+          versionNumber: nextVersionNumber,
+          sizeBytes: file.size,
+          changeNote: `Uploaded version ${nextVersionNumber}`,
+        },
+      });
+
+      notifyNewVersion({
+        workspaceId: req.workspace._id,
+        document: existingDoc,
+        versionNumber: nextVersionNumber,
+        actor: req.user,
+      });
+
       return res.status(200).json({
         message: `Version ${nextVersionNumber} uploaded for ${originalName}`,
         document: serializeDocument(existingDoc),
@@ -408,6 +468,21 @@ export const createDocument = TryCatch(async (req, res) => {
       document,
       version,
     }).catch((err) => console.error("Failed to enqueue AI job:", err.message));
+
+    logAuditEvent({
+      workspaceId: req.workspace._id,
+      actor: req.user,
+      action: "document.upload",
+      resourceType: "document",
+      resourceId: document._id,
+      metadata: {
+        name: document.name,
+        sizeBytes: document.sizeBytes,
+        mimeType: document.mimeType,
+        extension: document.extension,
+        folderId: document.folderId,
+      },
+    });
   } catch (error) {
     await Document.deleteOne({ _id: document._id });
     const message =
@@ -455,6 +530,19 @@ export const getDocumentFile = TryCatch(async (req, res) => {
     disposition,
   });
 
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.view",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: filename,
+      disposition,
+      sizeBytes: version.sizeBytes || document.sizeBytes,
+    },
+  });
+
   res.json({
     url,
     name: filename,
@@ -500,6 +588,18 @@ export const moveDocument = TryCatch(async (req, res) => {
   document.updatedBy = req.user._id;
   await document.save();
 
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.move",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: document.name,
+      targetFolderId,
+    },
+  });
+
   res.json({
     message: "Document moved",
     document: serializeDocument(document),
@@ -525,6 +625,17 @@ export const trashDocument = TryCatch(async (req, res) => {
   document.status = "trash";
   document.updatedBy = req.user._id;
   await document.save();
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.trash",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: document.name,
+    },
+  });
 
   res.json({
     message: "Document moved to trash",
@@ -561,6 +672,17 @@ export const restoreDocument = TryCatch(async (req, res) => {
   document.status = "active";
   document.updatedBy = req.user._id;
   await document.save();
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.restore",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: document.name,
+    },
+  });
 
   res.json({
     message: "Document restored",
@@ -632,6 +754,18 @@ export const permanentDeleteDocument = TryCatch(async (req, res) => {
     );
   }
 
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.delete",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: document.name,
+      freedBytes: totalBytes,
+    },
+  });
+
   res.json({
     message: "Document and all S3 files permanently deleted",
     freedBytes: totalBytes,
@@ -656,6 +790,17 @@ export const bulkTrashDocuments = TryCatch(async (req, res) => {
       updatedBy: req.user._id,
     }
   );
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.trash",
+    resourceType: "document",
+    metadata: {
+      count: result.modifiedCount,
+      documentIds: validIds,
+    },
+  });
 
   res.json({
     message: `${result.modifiedCount} documents moved to trash`,
@@ -692,6 +837,17 @@ export const bulkRestoreDocuments = TryCatch(async (req, res) => {
     await doc.save();
     restoredCount++;
   }
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.restore",
+    resourceType: "document",
+    metadata: {
+      count: restoredCount,
+      documentIds: validIds,
+    },
+  });
 
   res.json({
     message: `${restoredCount} documents restored`,
@@ -757,6 +913,18 @@ export const bulkPermanentDeleteDocuments = TryCatch(async (req, res) => {
     );
   }
 
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.delete",
+    resourceType: "document",
+    metadata: {
+      count: result.deletedCount,
+      documentIds: validIds,
+      freedBytes: totalBytes,
+    },
+  });
+
   res.json({
     message: `${result.deletedCount} documents and their S3 version files permanently deleted`,
     deletedCount: result.deletedCount,
@@ -796,6 +964,18 @@ export const bulkMoveDocuments = TryCatch(async (req, res) => {
       updatedBy: req.user._id,
     }
   );
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.move",
+    resourceType: "document",
+    metadata: {
+      count: result.modifiedCount,
+      documentIds: validIds,
+      targetFolderId,
+    },
+  });
 
   res.json({
     message: `${result.modifiedCount} documents moved`,
@@ -899,6 +1079,27 @@ export const createDocumentVersion = TryCatch(async (req, res) => {
     document,
     version,
   }).catch((err) => console.error("Failed to enqueue AI job:", err.message));
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.version_create",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: document.name,
+      versionNumber: nextVersionNumber,
+      sizeBytes: file.size,
+      changeNote: req.body.changeNote?.trim() || "",
+    },
+  });
+
+  notifyNewVersion({
+    workspaceId: req.workspace._id,
+    document,
+    versionNumber: nextVersionNumber,
+    actor: req.user,
+  });
 
   res.status(201).json({
     message: `Version ${nextVersionNumber} uploaded successfully`,
@@ -1070,6 +1271,26 @@ export const revertDocumentVersion = TryCatch(async (req, res) => {
     document,
     version: newVersion,
   }).catch((err) => console.error("Failed to enqueue AI job on revert:", err.message));
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.version_revert",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      name: document.name,
+      revertedToVersion: targetVersion.versionNumber,
+      newVersionNumber: nextVersionNumber,
+    },
+  });
+
+  notifyNewVersion({
+    workspaceId: req.workspace._id,
+    document,
+    versionNumber: nextVersionNumber,
+    actor: req.user,
+  });
 
   res.json({
     message: `Reverted to version ${targetVersion.versionNumber}`,

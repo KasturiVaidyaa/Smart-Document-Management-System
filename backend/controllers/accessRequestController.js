@@ -4,6 +4,8 @@ import { AccessRequest } from "../models/AccessRequest.js";
 import { PermissionGrant } from "../models/PermissionGrant.js";
 import { Document } from "../models/Document.js";
 import { DOCUMENT_ACTIONS } from "../constants/permissions.js";
+import { logAuditEvent } from "../services/auditService.js";
+import { createNotification, notifyUsers } from "../services/notificationService.js";
 
 /**
  * POST /api/workspaces/:workspaceId/documents/:documentId/access-requests
@@ -53,6 +55,41 @@ export const createAccessRequest = TryCatch(async (req, res) => {
     status: "pending",
     message: message?.trim() || undefined,
   });
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "access_request.create",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: {
+      requestId: request._id,
+      documentName: document.name,
+      message: request.message,
+    },
+  });
+
+  const notifyUserIds = [
+    document.createdBy?.toString(),
+    req.workspace.ownerId?.toString(),
+  ].filter((id) => id && id !== req.user._id?.toString());
+
+  const uniqueNotifyIds = [...new Set(notifyUserIds)];
+  if (uniqueNotifyIds.length > 0) {
+    notifyUsers({
+      userIds: uniqueNotifyIds,
+      workspaceId: req.workspace._id,
+      type: "access_requested",
+      payload: {
+        documentId: document._id,
+        documentName: document.name,
+        requestId: request._id,
+        requesterId: req.user._id,
+        requesterName: req.user.name || req.user.email,
+        message: request.message,
+      },
+    });
+  }
 
   res.status(201).json({
     message: "Access request submitted",
@@ -164,6 +201,34 @@ export const resolveAccessRequest = TryCatch(async (req, res) => {
         grantedBy: req.user._id,
       });
     }
+  }
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "access_request.resolve",
+    resourceType: "document",
+    resourceId: request.documentId,
+    metadata: {
+      requestId: request._id,
+      requesterId: request.requesterId,
+      status,
+      actions: grant?.actions || [],
+    },
+  });
+
+  if (String(request.requesterId) !== String(req.user._id)) {
+    createNotification({
+      userId: request.requesterId,
+      workspaceId: req.workspace._id,
+      type: status === "approved" ? "shared" : "permission_changed",
+      payload: {
+        documentId: request.documentId,
+        status,
+        actions: grant?.actions || [],
+        resolvedBy: req.user.name || req.user.email || "Workspace admin",
+      },
+    });
   }
 
   res.json({

@@ -3,6 +3,7 @@ import { Link, Outlet, useNavigate } from "react-router-dom";
 import { UserData } from "../context/UserContext";
 import { useWorkspace } from "../context/WorkspaceContext";
 import { toast } from "react-toastify";
+import { NotificationBell } from "./notifications/NotificationBell";
 
 const AppLayout = () => {
   const { user, logoutUser } = UserData();
@@ -36,7 +37,7 @@ const AppLayout = () => {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
-      <header className="border-b border-zinc-800 bg-zinc-900/80 backdrop-blur">
+      <header className="relative z-30 border-b border-zinc-800 bg-zinc-900/80 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
           <Link to="/app" className="text-lg font-semibold text-blue-400">
             Smart Cloud DMS
@@ -54,6 +55,7 @@ const AppLayout = () => {
                 </option>
               ))}
             </select>
+            <NotificationBell />
             <span className="hidden text-sm text-zinc-400 sm:inline">
               {user?.name}
             </span>

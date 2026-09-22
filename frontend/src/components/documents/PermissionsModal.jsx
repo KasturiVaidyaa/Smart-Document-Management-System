@@ -1,9 +1,26 @@
 import { useEffect, useState } from "react";
-import { X, Shield, UserPlus, Trash2, Clock, Users, Building2, Globe } from "lucide-react";
+import {
+  X,
+  Shield,
+  UserPlus,
+  Trash2,
+  Clock,
+  Users,
+  Building2,
+  Globe,
+  Edit3,
+  ListFilter,
+} from "lucide-react";
 import { toast } from "react-toastify";
 import api from "../../utils/api";
 
 const ACTIONS = ["view", "edit", "download", "share", "delete"];
+
+const DEFAULT_SYSTEM_ROLES = [
+  { _id: "admin", name: "Admin", isSystem: true },
+  { _id: "manager", name: "Manager", isSystem: true },
+  { _id: "employee", name: "Employee", isSystem: true },
+];
 
 const principalTypeLabels = {
   user: "User",
@@ -19,16 +36,24 @@ const principalTypeIcons = {
   workspace: <Globe className="h-4 w-4" />,
 };
 
-export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => {
+export const PermissionsModal = ({
+  isOpen,
+  onClose,
+  document,
+  workspaceId,
+}) => {
   const [directGrants, setDirectGrants] = useState([]);
   const [inheritedGrants, setInheritedGrants] = useState([]);
   const [loading, setLoading] = useState(false);
   const [members, setMembers] = useState([]);
+  const [roles, setRoles] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [submitting, setSubmitting] = useState(false);
 
   // New grant form state
   const [principalType, setPrincipalType] = useState("user");
   const [principalId, setPrincipalId] = useState("");
+  const [isManualInput, setIsManualInput] = useState(false);
   const [selectedActions, setSelectedActions] = useState(["view"]);
   const [expiresAt, setExpiresAt] = useState("");
 
@@ -36,6 +61,8 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
     if (isOpen && document && workspaceId) {
       loadPermissions();
       loadMembers();
+      loadRoles();
+      loadDepartments();
     }
   }, [isOpen, document?._id, workspaceId]);
 
@@ -48,7 +75,9 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
       setDirectGrants(data.directGrants || []);
       setInheritedGrants(data.inheritedGrants || []);
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Failed to load permissions");
+      toast.error(
+        error?.response?.data?.message || "Failed to load permissions"
+      );
     } finally {
       setLoading(false);
     }
@@ -60,6 +89,26 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
       setMembers(data.members || []);
     } catch {
       // Non-critical — user picker won't have options
+    }
+  };
+
+  const loadRoles = async () => {
+    try {
+      const { data } = await api.get(`/api/workspaces/${workspaceId}/roles`);
+      setRoles(data.roles || []);
+    } catch {
+      // Non-critical
+    }
+  };
+
+  const loadDepartments = async () => {
+    try {
+      const { data } = await api.get(
+        `/api/workspaces/${workspaceId}/departments`
+      );
+      setDepartments(data.departments || []);
+    } catch {
+      // Non-critical
     }
   };
 
@@ -77,8 +126,8 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
       toast.error("Select at least one action");
       return;
     }
-    if (principalType !== "workspace" && !principalId) {
-      toast.error("Select a user, role, or department");
+    if (principalType !== "workspace" && !principalId.trim()) {
+      toast.error("Select or enter a valid user, role, or department");
       return;
     }
 
@@ -88,7 +137,8 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
         resourceType: "document",
         resourceId: document._id,
         principalType,
-        principalId: principalType === "workspace" ? undefined : principalId,
+        principalId:
+          principalType === "workspace" ? undefined : principalId.trim(),
         actions: selectedActions,
         expiresAt: expiresAt || undefined,
       });
@@ -98,7 +148,9 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
       setExpiresAt("");
       await loadPermissions();
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Failed to grant permission");
+      toast.error(
+        error?.response?.data?.message || "Failed to grant permission"
+      );
     } finally {
       setSubmitting(false);
     }
@@ -110,42 +162,68 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
       toast.success("Permission revoked");
       await loadPermissions();
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Failed to revoke permission");
+      toast.error(
+        error?.response?.data?.message || "Failed to revoke permission"
+      );
     }
   };
 
-  // Get unique roles and departments from members
-  const uniqueRoles = [];
-  const seenRoles = new Set();
-  const uniqueDepts = [];
-  const seenDepts = new Set();
+  // Compile combined roles list
+  const allRolesMap = new Map();
+  // 1. Roles from workspace API
+  for (const r of roles) {
+    allRolesMap.set(String(r._id), r);
+  }
+  // 2. Roles from members
   for (const m of members) {
     for (const r of m.roles || []) {
-      if (!seenRoles.has(r._id)) {
-        seenRoles.add(r._id);
-        uniqueRoles.push(r);
-      }
-    }
-    for (const d of m.departments || []) {
-      if (!seenDepts.has(d._id)) {
-        seenDepts.add(d._id);
-        uniqueDepts.push(d);
+      if (!allRolesMap.has(String(r._id))) {
+        allRolesMap.set(String(r._id), r);
       }
     }
   }
+  // 3. Default fallback if empty
+  if (allRolesMap.size === 0) {
+    for (const r of DEFAULT_SYSTEM_ROLES) {
+      allRolesMap.set(r._id, r);
+    }
+  }
+  const availableRoles = Array.from(allRolesMap.values());
+
+  // Compile combined departments list
+  const allDeptsMap = new Map();
+  for (const d of departments) {
+    allDeptsMap.set(String(d._id), d);
+  }
+  for (const m of members) {
+    for (const d of m.departments || []) {
+      if (!allDeptsMap.has(String(d._id))) {
+        allDeptsMap.set(String(d._id), d);
+      }
+    }
+  }
+  const availableDepts = Array.from(allDeptsMap.values());
 
   const renderPrincipalName = (grant) => {
     if (grant.principalType === "workspace") return "Everyone in workspace";
     if (grant.principalType === "user") {
-      const member = members.find((m) => String(m.userId) === String(grant.principalId));
-      return member ? `${member.name} (${member.email})` : String(grant.principalId);
+      const member = members.find(
+        (m) => String(m.userId) === String(grant.principalId)
+      );
+      return member
+        ? `${member.name} (${member.email})`
+        : String(grant.principalId);
     }
     if (grant.principalType === "role") {
-      const role = uniqueRoles.find((r) => String(r._id) === String(grant.principalId));
+      const role = availableRoles.find(
+        (r) => String(r._id) === String(grant.principalId)
+      );
       return role ? `Role: ${role.name}` : `Role: ${grant.principalId}`;
     }
     if (grant.principalType === "department") {
-      const dept = uniqueDepts.find((d) => String(d._id) === String(grant.principalId));
+      const dept = availableDepts.find(
+        (d) => String(d._id) === String(grant.principalId)
+      );
       return dept ? `Dept: ${dept.name}` : `Dept: ${grant.principalId}`;
     }
     return String(grant.principalId);
@@ -179,7 +257,10 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
 
         <div className="overflow-y-auto flex-1 p-6 space-y-6">
           {/* Grant form */}
-          <form onSubmit={handleGrant} className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4">
+          <form
+            onSubmit={handleGrant}
+            className="space-y-4 rounded-xl border border-zinc-800 bg-zinc-950/50 p-4"
+          >
             <h4 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
               <UserPlus className="h-4 w-4 text-emerald-400" />
               Grant access
@@ -195,7 +276,7 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
                     setPrincipalType(e.target.value);
                     setPrincipalId("");
                   }}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 >
                   <option value="user">User</option>
                   <option value="role">Role</option>
@@ -204,37 +285,70 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
                 </select>
               </div>
 
-              {/* Principal selector */}
+              {/* Principal selector / manual input */}
               {principalType !== "workspace" && (
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">
-                    {principalTypeLabels[principalType]}
-                  </label>
-                  <select
-                    value={principalId}
-                    onChange={(e) => setPrincipalId(e.target.value)}
-                    className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
-                  >
-                    <option value="">Select...</option>
-                    {principalType === "user" &&
-                      members.map((m) => (
-                        <option key={m.userId} value={m.userId}>
-                          {m.name} ({m.email})
-                        </option>
-                      ))}
-                    {principalType === "role" &&
-                      uniqueRoles.map((r) => (
-                        <option key={r._id} value={r._id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    {principalType === "department" &&
-                      uniqueDepts.map((d) => (
-                        <option key={d._id} value={d._id}>
-                          {d.name}
-                        </option>
-                      ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs text-zinc-400">
+                      {principalTypeLabels[principalType]}
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsManualInput(!isManualInput)}
+                      className="text-[11px] text-blue-400 hover:text-blue-300 underline flex items-center gap-1"
+                    >
+                      {isManualInput ? (
+                        <>
+                          <ListFilter className="h-3 w-3" /> Select from list
+                        </>
+                      ) : (
+                        <>
+                          <Edit3 className="h-3 w-3" /> Write / custom ID
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {isManualInput ? (
+                    <input
+                      type="text"
+                      value={principalId}
+                      onChange={(e) => setPrincipalId(e.target.value)}
+                      placeholder={`Enter ${principalTypeLabels[principalType]} ID or identifier...`}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none"
+                    />
+                  ) : (
+                    <select
+                      value={principalId}
+                      onChange={(e) => setPrincipalId(e.target.value)}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
+                    >
+                      <option value="">
+                        Select a {principalTypeLabels[principalType]}...
+                      </option>
+
+                      {principalType === "user" &&
+                        members.map((m) => (
+                          <option key={m.userId} value={m.userId}>
+                            {m.name} ({m.email})
+                          </option>
+                        ))}
+
+                      {principalType === "role" &&
+                        availableRoles.map((r) => (
+                          <option key={r._id} value={r._id}>
+                            {r.name} {r.isSystem ? "(System Role)" : "(Custom Role)"}
+                          </option>
+                        ))}
+
+                      {principalType === "department" &&
+                        availableDepts.map((d) => (
+                          <option key={d._id} value={d._id}>
+                            {d.name}
+                          </option>
+                        ))}
+                    </select>
+                  )}
                 </div>
               )}
             </div>
@@ -270,7 +384,7 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
                   type="datetime-local"
                   value={expiresAt}
                   onChange={(e) => setExpiresAt(e.target.value)}
-                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 />
               </div>
               <button
@@ -377,7 +491,9 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
                         </div>
                       </div>
                     </div>
-                    <span className="text-[10px] text-zinc-600 shrink-0">inherited</span>
+                    <span className="text-[10px] text-zinc-600 shrink-0">
+                      inherited
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -388,3 +504,5 @@ export const PermissionsModal = ({ isOpen, onClose, document, workspaceId }) => 
     </div>
   );
 };
+
+export default PermissionsModal;
