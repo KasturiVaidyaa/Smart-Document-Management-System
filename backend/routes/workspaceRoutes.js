@@ -20,10 +20,12 @@ import {
   createDocumentVersion,
   getDocumentFile,
   getDocumentVersionFile,
+  getDocumentAiStatus,
   listDocumentVersions,
   listDocuments,
   moveDocument,
   permanentDeleteDocument,
+  reprocessDocument,
   restoreDocument,
   revertDocumentVersion,
   trashDocument,
@@ -156,6 +158,17 @@ router.delete(
   "/:workspaceId/documents/:documentId/permanent",
   requireWorkspace,
   permanentDeleteDocument
+);
+
+router.post(
+  "/:workspaceId/documents/:documentId/reprocess",
+  requireWorkspace,
+  reprocessDocument
+);
+router.get(
+  "/:workspaceId/documents/:documentId/ai-status",
+  requireWorkspace,
+  getDocumentAiStatus
 );
 
 // Document Versioning

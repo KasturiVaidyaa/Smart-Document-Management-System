@@ -1,5 +1,5 @@
-import { useEffect, useState, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "react-toastify";
 import {
   FileText,
@@ -27,6 +27,14 @@ import {
   Link2,
   Building2,
   Activity,
+  Brain,
+  RefreshCw,
+  ChevronDown,
+  ChevronUp,
+  Tag,
+  Filter,
+  CalendarDays,
+  Sparkles,
 } from "lucide-react";
 import api from "../utils/api";
 import { useWorkspace } from "../context/WorkspaceContext";
@@ -42,6 +50,7 @@ import { BulkActionBar } from "../components/documents/BulkActionBar";
 import { PermissionsModal } from "../components/documents/PermissionsModal";
 import { ShareLinkModal } from "../components/documents/ShareLinkModal";
 import { DocumentTimelineModal } from "../components/documents/DocumentTimelineModal";
+import { DocumentSkeleton } from "../components/documents/DocumentSkeleton";
 
 const formatBytes = (bytes = 0) => {
   if (!bytes) return "0 B";
@@ -68,24 +77,205 @@ const getFileIcon = (mimeType = "", name = "") => {
   return <File className="h-5 w-5 text-blue-400" />;
 };
 
+/** Renders a processing status badge with colored classes */
+const ProcessingStatusBadge = ({ processing, jobStatus }) => {
+  // Determine the most meaningful status to show
+  let status = "none";
+  if (jobStatus === "running" || jobStatus === "queued") {
+    status = "running";
+  } else if (jobStatus === "failed" || processing?.embed === "failed" || processing?.extract === "failed") {
+    status = "failed";
+  } else if (jobStatus === "ready" || processing?.embed === "ready") {
+    status = "ready";
+  } else if (processing?.embed === "pending" || processing?.extract === "pending") {
+    status = "pending";
+  }
+
+  if (status === "none") return null;
+
+  const labels = { pending: "Pending", running: "Processing…", ready: "AI Ready", failed: "AI Failed" };
+  const classMap = {
+    pending: "status-pending",
+    running: "status-running",
+    ready: "status-ready",
+    failed: "status-failed",
+  };
+
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${classMap[status]}`}>
+      {status === "running" && (
+        <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+      )}
+      {labels[status]}
+    </span>
+  );
+};
+
+/**
+ * Highlights query terms in a snippet string.
+ * Converts **term** markers (from backend) into <mark> elements.
+ */
+const HighlightedSnippet = ({ text = "" }) => {
+  if (!text) return null;
+
+  // Backend sends **term** markers; convert to JSX highlights
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <span>
+      {parts.map((part, i) => {
+        if (part.startsWith("**") && part.endsWith("**")) {
+          return (
+            <mark key={i} className="search-highlight">
+              {part.slice(2, -2)}
+            </mark>
+          );
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </span>
+  );
+};
+
+/** Collapsible AI Intelligence panel for a document row */
+const AiPanel = ({ doc, workspaceId, onReprocessed }) => {
+  const [reprocessing, setReprocessing] = useState(false);
+
+  const handleReprocess = async () => {
+    setReprocessing(true);
+    try {
+      const { data } = await api.post(
+        `/api/workspaces/${workspaceId}/documents/${doc._id}/reprocess`
+      );
+      toast.success("Reprocessing started — AI will update summary, category, and keywords shortly.");
+      if (onReprocessed) onReprocessed(data.document);
+    } catch (err) {
+      toast.error(err?.response?.data?.message || "Reprocess failed");
+    } finally {
+      setReprocessing(false);
+    }
+  };
+
+  const hasAiData = doc.summary || doc.aiCategory || (doc.aiKeywords && doc.aiKeywords.length > 0);
+
+  return (
+    <div className="mt-2 rounded-lg border border-zinc-700/50 bg-zinc-950/40 px-3 py-2.5 text-xs space-y-2">
+      {/* Processing status */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+          <span className="text-zinc-400 font-medium">AI Intelligence</span>
+          <ProcessingStatusBadge processing={doc.processing} jobStatus={doc.jobStatus} />
+        </div>
+        <button
+          type="button"
+          onClick={handleReprocess}
+          disabled={reprocessing}
+          title="Re-trigger AI processing for this document"
+          className="inline-flex items-center gap-1 rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-[10px] font-medium text-zinc-300 hover:bg-zinc-700 hover:text-blue-300 disabled:opacity-50 transition-colors"
+        >
+          <RefreshCw className={`h-3 w-3 ${reprocessing ? "animate-spin" : ""}`} />
+          {reprocessing ? "Starting…" : "Re-process"}
+        </button>
+      </div>
+
+      {hasAiData ? (
+        <>
+          {/* AI Category */}
+          {doc.aiCategory && (
+            <div className="flex items-start gap-2">
+              <Tag className="h-3.5 w-3.5 text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-zinc-500 mr-1">AI Category:</span>
+                <span className="inline-flex items-center rounded-full bg-indigo-900/40 border border-indigo-700/50 px-2 py-0.5 text-[10px] font-medium text-indigo-300">
+                  {doc.aiCategory}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* AI Keywords */}
+          {doc.aiKeywords && doc.aiKeywords.length > 0 && (
+            <div className="flex items-start gap-2">
+              <Brain className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-zinc-500 mr-1.5">Keywords:</span>
+                <span className="flex flex-wrap gap-1 mt-0.5">
+                  {doc.aiKeywords.slice(0, 8).map((kw, i) => (
+                    <span
+                      key={i}
+                      className="rounded-md bg-emerald-900/30 border border-emerald-700/40 px-1.5 py-0.5 text-[10px] text-emerald-300"
+                    >
+                      {kw}
+                    </span>
+                  ))}
+                  {doc.aiKeywords.length > 8 && (
+                    <span className="text-zinc-500">+{doc.aiKeywords.length - 8} more</span>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* AI Summary */}
+          {doc.summary && (
+            <div className="flex items-start gap-2">
+              <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="text-zinc-500 mr-1">Summary:</span>
+                <span className="text-zinc-300 leading-relaxed">{doc.summary}</span>
+              </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-zinc-500 pl-5">
+          {doc.processing?.embed === "pending" || doc.processing?.extract === "pending"
+            ? "AI processing is queued. Results will appear here once complete."
+            : "No AI data yet. Click Re-process to analyze this document."}
+        </p>
+      )}
+    </div>
+  );
+};
+
+// ─── Main Component ─────────────────────────────────────────────────────────
+
 const Documents = () => {
   const { currentWorkspaceId, current, fetchWorkspaces } = useWorkspace();
+  const [searchParams] = useSearchParams();
 
   // Core Data
   const [documents, setDocuments] = useState([]);
   const [folders, setFolders] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null);
   const [query, setQuery] = useState("");
   const [searching, setSearching] = useState(false);
+  const [isSearchMode, setIsSearchMode] = useState(false);
 
   // Navigation & Filtering State
-  const [activeTab, setActiveTab] = useState("files"); // "files" | "trash"
-  const [selectedFolderId, setSelectedFolderId] = useState("all"); // "all" | null (Root) | folderId
-  const [selectedDepartmentId, setSelectedDepartmentId] = useState("all"); // "all" | "unassigned" | deptId
+  const [activeTab, setActiveTab] = useState("files");
+  const [selectedFolderId, setSelectedFolderId] = useState("all");
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState("all");
   const [uploadDepartmentId, setUploadDepartmentId] = useState("");
+
+  // AI / Search Filters
+  const [filterAiCategory, setFilterAiCategory] = useState("all");
+  const [filterExtension, setFilterExtension] = useState("all");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterTags, setFilterTags] = useState("");
+  const [showSearchFilters, setShowSearchFilters] = useState(false);
+
+  // AI Panel visibility
+  const [expandedAiDocId, setExpandedAiDocId] = useState(null);
+
+  // Drag-and-drop
+  const [isDragOver, setIsDragOver] = useState(false);
+  const dropZoneRef = useRef(null);
 
   // Multi-Selection State
   const [selectedDocIds, setSelectedDocIds] = useState(new Set());
@@ -107,13 +297,25 @@ const Documents = () => {
   // Permanent Delete Confirmation Modal
   const [permDeleteConfirmDocs, setPermDeleteConfirmDocs] = useState(null);
 
+  // Highlight document from URL param (e.g. ?highlight=id from chat citations)
+  const highlightId = searchParams.get("highlight");
+
+  // Fetch Categories
+  const loadCategories = async () => {
+    if (!currentWorkspaceId) return;
+    try {
+      const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/categories`);
+      setCategories(data.categories || []);
+    } catch {
+      // silently ignore
+    }
+  };
+
   // Fetch Departments
   const loadDepartments = async () => {
     if (!currentWorkspaceId) return;
     try {
-      const { data } = await api.get(
-        `/api/workspaces/${currentWorkspaceId}/departments`
-      );
+      const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/departments`);
       setDepartments(data.departments || []);
     } catch (error) {
       console.error("Failed to load departments:", error);
@@ -124,9 +326,7 @@ const Documents = () => {
   const loadFolders = async () => {
     if (!currentWorkspaceId) return;
     try {
-      const { data } = await api.get(
-        `/api/workspaces/${currentWorkspaceId}/folders`
-      );
+      const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/folders`);
       setFolders(data.folders || []);
     } catch (error) {
       console.error("Failed to load folders:", error);
@@ -137,6 +337,7 @@ const Documents = () => {
   const loadDocuments = async () => {
     if (!currentWorkspaceId) return;
     setLoading(true);
+    setIsSearchMode(false);
     try {
       const params = {};
       if (activeTab === "trash") {
@@ -150,6 +351,11 @@ const Documents = () => {
 
       if (selectedDepartmentId !== "all") {
         params.departmentId = selectedDepartmentId;
+      }
+
+      // AI category filter on listing
+      if (filterAiCategory !== "all" && filterAiCategory) {
+        params.aiCategory = filterAiCategory;
       }
 
       const { data } = await api.get(
@@ -169,24 +375,35 @@ const Documents = () => {
       loadFolders();
       loadDepartments();
       loadDocuments();
+      loadCategories();
       setPreview(null);
       setSelectedDocIds(new Set());
+      setExpandedAiDocId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentWorkspaceId, activeTab, selectedFolderId, selectedDepartmentId]);
+  }, [currentWorkspaceId, activeTab, selectedFolderId, selectedDepartmentId, filterAiCategory]);
 
   // Search
   const onSearch = async (e) => {
-    e.preventDefault();
-    if (!query.trim() || !currentWorkspaceId) {
+    e?.preventDefault();
+    if (!query.trim() && !filterExtension && !filterDateFrom && !filterDateTo && !filterTags) {
       loadDocuments();
       return;
     }
+    if (!currentWorkspaceId) return;
     setSearching(true);
+    setIsSearchMode(true);
     try {
+      const params = { q: query.trim() };
+      if (filterAiCategory && filterAiCategory !== "all") params.aiCategory = filterAiCategory;
+      if (filterExtension && filterExtension !== "all") params.extension = filterExtension;
+      if (filterDateFrom) params.dateFrom = filterDateFrom;
+      if (filterDateTo) params.dateTo = filterDateTo;
+      if (filterTags.trim()) params.tags = filterTags.trim();
+
       const { data } = await api.get(
         `/api/workspaces/${currentWorkspaceId}/search`,
-        { params: { q: query.trim() } }
+        { params }
       );
       setDocuments(data.documents || []);
     } catch (error) {
@@ -196,12 +413,34 @@ const Documents = () => {
     }
   };
 
-  // Upload
-  const onUpload = async (event) => {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file || !currentWorkspaceId) return;
+  const clearSearch = () => {
+    setQuery("");
+    setFilterAiCategory("all");
+    setFilterExtension("all");
+    setFilterDateFrom("");
+    setFilterDateTo("");
+    setFilterTags("");
+    setShowSearchFilters(false);
+    loadDocuments();
+  };
 
+  // Drag-and-drop handlers
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e) => {
+    e.preventDefault();
+    if (dropZoneRef.current && !dropZoneRef.current.contains(e.relatedTarget)) {
+      setIsDragOver(false);
+    }
+  }, []);
+
+  // Upload (shared between click and drag-drop)
+  const uploadFile = async (file) => {
+    if (!file || !currentWorkspaceId) return;
     const form = new FormData();
     form.append("file", file);
     if (selectedFolderId && selectedFolderId !== "all") {
@@ -221,13 +460,9 @@ const Documents = () => {
     try {
       const { data } = await api.post(`/api/workspaces/${currentWorkspaceId}/documents`, form);
       if (data.isNewVersion) {
-        toast.success(
-          data.message || "New version uploaded successfully"
-        );
+        toast.success(data.message || "New version uploaded successfully");
       } else {
-        toast.success(
-          "File uploaded. AI processing starts in the background for PDF/DOCX/PPTX/TXT."
-        );
+        toast.success("File uploaded. AI processing starts in the background for PDF/DOCX/PPTX/TXT.");
       }
       await loadDocuments();
       await fetchWorkspaces();
@@ -238,7 +473,24 @@ const Documents = () => {
     }
   };
 
-  // Open Preview in new browser tab
+  const handleDrop = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !currentWorkspaceId) return;
+    await uploadFile(file);
+  };
+
+  // Upload via file input
+  const onUpload = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    await uploadFile(file);
+  };
+
+  // Open Preview
   const openDocument = async (doc) => {
     try {
       const { data } = await api.get(
@@ -253,7 +505,7 @@ const Documents = () => {
     }
   };
 
-  // Explicit Download
+  // Download
   const downloadDocument = async (doc) => {
     try {
       const { data } = await api.get(
@@ -276,9 +528,7 @@ const Documents = () => {
   // Soft Delete (Trash)
   const onTrashDoc = async (doc) => {
     try {
-      await api.patch(
-        `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/trash`
-      );
+      await api.patch(`/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/trash`);
       toast.info(`"${doc.name}" moved to Trash`);
       await loadDocuments();
       setSelectedDocIds((prev) => {
@@ -294,9 +544,7 @@ const Documents = () => {
   // Restore
   const onRestoreDoc = async (doc) => {
     try {
-      await api.post(
-        `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/restore`
-      );
+      await api.post(`/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/restore`);
       toast.success(`"${doc.name}" restored`);
       await loadDocuments();
       setSelectedDocIds((prev) => {
@@ -312,20 +560,14 @@ const Documents = () => {
   // Permanent Delete
   const onConfirmPermanentDelete = async () => {
     if (!permDeleteConfirmDocs || permDeleteConfirmDocs.length === 0) return;
-
     try {
       if (permDeleteConfirmDocs.length === 1) {
         const doc = permDeleteConfirmDocs[0];
-        await api.delete(
-          `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/permanent`
-        );
+        await api.delete(`/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/permanent`);
         toast.success(`"${doc.name}" permanently deleted`);
       } else {
         const documentIds = permDeleteConfirmDocs.map((d) => d._id);
-        await api.post(
-          `/api/workspaces/${currentWorkspaceId}/documents/bulk-delete`,
-          { documentIds }
-        );
+        await api.post(`/api/workspaces/${currentWorkspaceId}/documents/bulk-delete`, { documentIds });
         toast.success(`${documentIds.length} documents permanently deleted`);
       }
       setPermDeleteConfirmDocs(null);
@@ -333,9 +575,7 @@ const Documents = () => {
       await fetchWorkspaces();
       setSelectedDocIds(new Set());
     } catch (error) {
-      toast.error(
-        error?.response?.data?.message || "Could not permanently delete"
-      );
+      toast.error(error?.response?.data?.message || "Could not permanently delete");
     }
   };
 
@@ -344,17 +584,11 @@ const Documents = () => {
     try {
       if (docsToMove.length === 1) {
         const doc = docsToMove[0];
-        await api.patch(
-          `/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/move`,
-          { folderId: targetFolderId }
-        );
+        await api.patch(`/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/move`, { folderId: targetFolderId });
         toast.success(`"${doc.name}" moved`);
       } else {
         const documentIds = docsToMove.map((d) => d._id);
-        await api.post(
-          `/api/workspaces/${currentWorkspaceId}/documents/bulk-move`,
-          { documentIds, folderId: targetFolderId }
-        );
+        await api.post(`/api/workspaces/${currentWorkspaceId}/documents/bulk-move`, { documentIds, folderId: targetFolderId });
         toast.success(`${documentIds.length} documents moved`);
       }
       setDocsToMove([]);
@@ -368,10 +602,7 @@ const Documents = () => {
   // Folder CRUD handlers
   const handleCreateFolder = async ({ name, parentId }) => {
     try {
-      await api.post(`/api/workspaces/${currentWorkspaceId}/folders`, {
-        name,
-        parentId,
-      });
+      await api.post(`/api/workspaces/${currentWorkspaceId}/folders`, { name, parentId });
       toast.success("Folder created");
       await loadFolders();
     } catch (error) {
@@ -381,10 +612,7 @@ const Documents = () => {
 
   const handleRenameFolder = async (folderId, newName) => {
     try {
-      await api.patch(
-        `/api/workspaces/${currentWorkspaceId}/folders/${folderId}`,
-        { name: newName }
-      );
+      await api.patch(`/api/workspaces/${currentWorkspaceId}/folders/${folderId}`, { name: newName });
       toast.success("Folder renamed");
       await loadFolders();
     } catch (error) {
@@ -394,13 +622,9 @@ const Documents = () => {
 
   const handleDeleteFolder = async (folderId) => {
     try {
-      await api.delete(
-        `/api/workspaces/${currentWorkspaceId}/folders/${folderId}`
-      );
+      await api.delete(`/api/workspaces/${currentWorkspaceId}/folders/${folderId}`);
       toast.success("Folder deleted");
-      if (selectedFolderId === folderId) {
-        setSelectedFolderId(null);
-      }
+      if (selectedFolderId === folderId) setSelectedFolderId(null);
       await loadFolders();
       await loadDocuments();
     } catch (error) {
@@ -408,14 +632,11 @@ const Documents = () => {
     }
   };
 
-  // Bulk Operations Handlers
+  // Bulk Operations
   const handleBulkTrash = async () => {
     const ids = Array.from(selectedDocIds);
     try {
-      await api.post(
-        `/api/workspaces/${currentWorkspaceId}/documents/bulk-trash`,
-        { documentIds: ids }
-      );
+      await api.post(`/api/workspaces/${currentWorkspaceId}/documents/bulk-trash`, { documentIds: ids });
       toast.info(`${ids.length} documents moved to Trash`);
       setSelectedDocIds(new Set());
       await loadDocuments();
@@ -427,10 +648,7 @@ const Documents = () => {
   const handleBulkRestore = async () => {
     const ids = Array.from(selectedDocIds);
     try {
-      await api.post(
-        `/api/workspaces/${currentWorkspaceId}/documents/bulk-restore`,
-        { documentIds: ids }
-      );
+      await api.post(`/api/workspaces/${currentWorkspaceId}/documents/bulk-restore`, { documentIds: ids });
       toast.success(`${ids.length} documents restored`);
       setSelectedDocIds(new Set());
       await loadDocuments();
@@ -453,34 +671,29 @@ const Documents = () => {
   const toggleSelectDoc = (docId) => {
     setSelectedDocIds((prev) => {
       const next = new Set(prev);
-      if (next.has(docId)) {
-        next.delete(docId);
-      } else {
-        next.add(docId);
-      }
+      if (next.has(docId)) next.delete(docId);
+      else next.add(docId);
       return next;
     });
   };
 
   const toggleSelectAll = () => {
-    if (selectedDocIds.size === documents.length) {
-      setSelectedDocIds(new Set());
-    } else {
-      setSelectedDocIds(new Set(documents.map((d) => d._id)));
-    }
+    if (selectedDocIds.size === documents.length) setSelectedDocIds(new Set());
+    else setSelectedDocIds(new Set(documents.map((d) => d._id)));
+  };
+
+  // Update a single doc in the list (after reprocess)
+  const handleDocReprocessed = (updatedDoc) => {
+    setDocuments((prev) =>
+      prev.map((d) => (String(d._id) === String(updatedDoc._id) ? { ...d, ...updatedDoc } : d))
+    );
   };
 
   // Compute Breadcrumb trail
   const breadcrumbTrail = useMemo(() => {
-    if (activeTab === "trash") {
-      return [{ id: "trash", name: "Trash" }];
-    }
-    if (selectedFolderId === "all") {
-      return [{ id: "all", name: "All Documents" }];
-    }
-    if (selectedFolderId === null) {
-      return [{ id: null, name: "Root Directory" }];
-    }
+    if (activeTab === "trash") return [{ id: "trash", name: "Trash" }];
+    if (selectedFolderId === "all") return [{ id: "all", name: "All Documents" }];
+    if (selectedFolderId === null) return [{ id: null, name: "Root Directory" }];
 
     const map = new Map(folders.map((f) => [f._id, f]));
     const trail = [];
@@ -493,14 +706,12 @@ const Documents = () => {
     return trail;
   }, [activeTab, selectedFolderId, folders]);
 
-  // Folder lookup map for document badges
   const folderNameMap = useMemo(() => {
     const map = new Map();
     folders.forEach((f) => map.set(f._id, f.name));
     return map;
   }, [folders]);
 
-  // Department lookup map for document badges
   const departmentNameMap = useMemo(() => {
     const map = new Map();
     departments.forEach((d) => map.set(d._id, d.name));
@@ -508,16 +719,30 @@ const Documents = () => {
   }, [departments]);
 
   return (
-    <div className="space-y-6">
+    <div
+      className="space-y-6"
+      ref={dropZoneRef}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag-and-drop overlay */}
+      {isDragOver && (
+        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-blue-950/60 backdrop-blur-sm">
+          <div className="rounded-2xl border-2 border-dashed border-blue-400 bg-blue-900/40 px-12 py-10 text-center shadow-2xl">
+            <Upload className="mx-auto h-12 w-12 text-blue-400 mb-3" />
+            <p className="text-lg font-semibold text-blue-200">Drop file to upload</p>
+            <p className="text-sm text-blue-400 mt-1">Max 25MB</p>
+          </div>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            Documents
-          </h1>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Documents</h1>
           <p className="text-sm text-zinc-400">
-            {current?.workspace?.name || "Workspace"} — manage, organize, and
-            version your files
+            {current?.workspace?.name || "Workspace"} — manage, organize, and version your files
           </p>
         </div>
 
@@ -533,9 +758,7 @@ const Documents = () => {
                   className="bg-transparent text-xs text-zinc-300 focus:outline-none cursor-pointer"
                 >
                   <option value="" className="bg-zinc-900 text-zinc-300">
-                    {selectedDepartmentId &&
-                    selectedDepartmentId !== "all" &&
-                    selectedDepartmentId !== "unassigned"
+                    {selectedDepartmentId && selectedDepartmentId !== "all" && selectedDepartmentId !== "unassigned"
                       ? `Upload Dept (${departmentNameMap.get(selectedDepartmentId) || "Selected"})`
                       : "No Department"}
                   </option>
@@ -547,7 +770,10 @@ const Documents = () => {
                 </select>
               </div>
             )}
-            <label className="flex items-center gap-2 cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 shadow-md shadow-blue-900/30 transition-all">
+            <label
+              className={`flex items-center gap-2 cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 shadow-md shadow-blue-900/30 transition-all ${isDragOver ? "bg-blue-500" : ""}`}
+              title="Click to browse or drag a file anywhere on the page"
+            >
               <Upload className="h-4 w-4" />
               {uploading ? "Uploading..." : "Upload file"}
               <input
@@ -561,50 +787,209 @@ const Documents = () => {
         )}
       </div>
 
-      {/* Search & Department Filter Bar */}
-      <div className="flex flex-col sm:flex-row gap-2">
-        <form onSubmit={onSearch} className="flex-1 flex gap-2">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search documents by name, category, or meaning..."
-              className="w-full rounded-lg border border-zinc-800 bg-zinc-900/90 pl-9 pr-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            />
-          </div>
-          <button
-            type="submit"
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors"
-          >
-            {searching ? "Searching..." : "Search"}
-          </button>
-        </form>
-
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-3 py-2 text-xs">
-            <Building2 className="h-4 w-4 text-zinc-400 shrink-0" />
-            <select
-              value={selectedDepartmentId}
-              onChange={(e) => setSelectedDepartmentId(e.target.value)}
-              aria-label="Filter documents by department"
-              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
+      {/* Search & Filter Bar */}
+      <div className="space-y-2">
+        <div className="flex flex-col sm:flex-row gap-2">
+          <form onSubmit={onSearch} className="flex-1 flex gap-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search documents by name, category, or meaning..."
+                className="w-full rounded-lg border border-zinc-800 bg-zinc-900/90 pl-9 pr-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+            <button
+              type="submit"
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-200 hover:bg-zinc-800 hover:text-white transition-colors"
             >
-              <option value="all" className="bg-zinc-900 text-zinc-200">
-                All Departments
-              </option>
-              <option value="unassigned" className="bg-zinc-900 text-zinc-200">
-                Unassigned
-              </option>
-              {departments.map((dept) => (
-                <option key={dept._id} value={dept._id} className="bg-zinc-900 text-zinc-200">
-                  {dept.name}
-                </option>
-              ))}
-            </select>
+              {searching ? "Searching..." : "Search"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowSearchFilters((v) => !v)}
+              title="Toggle search filters"
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm transition-colors ${showSearchFilters ? "border-blue-600 bg-blue-600/10 text-blue-300" : "border-zinc-700 bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800"}`}
+            >
+              <Filter className="h-4 w-4" />
+              <span className="hidden sm:inline">Filters</span>
+            </button>
+            {isSearchMode && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                title="Clear search"
+                className="flex items-center gap-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </form>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900/90 px-3 py-2 text-xs">
+              <Building2 className="h-4 w-4 text-zinc-400 shrink-0" />
+              <select
+                value={selectedDepartmentId}
+                onChange={(e) => setSelectedDepartmentId(e.target.value)}
+                aria-label="Filter documents by department"
+                className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
+              >
+                <option value="all" className="bg-zinc-900 text-zinc-200">All Departments</option>
+                <option value="unassigned" className="bg-zinc-900 text-zinc-200">Unassigned</option>
+                {departments.map((dept) => (
+                  <option key={dept._id} value={dept._id} className="bg-zinc-900 text-zinc-200">
+                    {dept.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
+
+        {/* Collapsible Search Filter Panel */}
+        {showSearchFilters && (
+          <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 space-y-3">
+            <p className="text-xs font-semibold text-zinc-400 flex items-center gap-2">
+              <Filter className="h-3.5 w-3.5" /> Advanced Filters
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* AI Category */}
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-1">AI Category</label>
+                <select
+                  value={filterAiCategory}
+                  onChange={(e) => setFilterAiCategory(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Categories</option>
+                  {categories.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* File Type */}
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-1">File Type</label>
+                <select
+                  value={filterExtension}
+                  onChange={(e) => setFilterExtension(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Types</option>
+                  <option value="pdf">PDF</option>
+                  <option value="docx">DOCX</option>
+                  <option value="pptx">PPTX</option>
+                  <option value="xlsx">XLSX</option>
+                  <option value="txt">TXT</option>
+                  <option value="md">Markdown</option>
+                  <option value="png">PNG</option>
+                  <option value="jpg">JPG</option>
+                  <option value="csv">CSV</option>
+                </select>
+              </div>
+
+              {/* Date From */}
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-1 flex items-center gap-1">
+                  <CalendarDays className="h-3 w-3" /> Date From
+                </label>
+                <input
+                  type="date"
+                  value={filterDateFrom}
+                  onChange={(e) => setFilterDateFrom(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Date To */}
+              <div>
+                <label className="block text-[11px] text-zinc-500 mb-1 flex items-center gap-1">
+                  <CalendarDays className="h-3 w-3" /> Date To
+                </label>
+                <input
+                  type="date"
+                  value={filterDateTo}
+                  onChange={(e) => setFilterDateTo(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Tags */}
+              <div className="sm:col-span-2">
+                <label className="block text-[11px] text-zinc-500 mb-1 flex items-center gap-1">
+                  <Tag className="h-3 w-3" /> Tags (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  value={filterTags}
+                  onChange={(e) => setFilterTags(e.target.value)}
+                  placeholder="e.g. contract, finance, Q3"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+
+              {/* Apply / Clear buttons */}
+              <div className="sm:col-span-2 flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={onSearch}
+                  className="flex-1 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 transition-colors"
+                >
+                  Apply Filters
+                </button>
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  className="flex-1 rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 hover:bg-zinc-700 transition-colors"
+                >
+                  Clear All
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Search mode banner */}
+        {isSearchMode && (
+          <div className="flex items-center gap-2 rounded-lg border border-blue-800/40 bg-blue-900/10 px-3 py-2 text-xs text-blue-300">
+            <Search className="h-3.5 w-3.5 shrink-0" />
+            <span>
+              Showing <strong>{documents.length}</strong> result{documents.length !== 1 ? "s" : ""}
+              {query && <> for <strong className="text-white">"{query}"</strong></>}
+            </span>
+            <button onClick={clearSearch} className="ml-auto hover:text-rose-400 transition-colors">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* AI Category Quick Filter */}
+      {!isSearchMode && activeTab === "files" && categories.length > 0 && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-[11px] text-zinc-500 flex items-center gap-1">
+            <Sparkles className="h-3 w-3" /> AI Category:
+          </span>
+          <button
+            onClick={() => setFilterAiCategory("all")}
+            className={`rounded-full px-3 py-1 text-[11px] font-medium border transition-colors ${filterAiCategory === "all" ? "border-blue-600 bg-blue-600/10 text-blue-300" : "border-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
+          >
+            All
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setFilterAiCategory(cat === filterAiCategory ? "all" : cat)}
+              className={`rounded-full px-3 py-1 text-[11px] font-medium border transition-colors ${filterAiCategory === cat ? "border-indigo-600 bg-indigo-600/10 text-indigo-300" : "border-zinc-700 text-zinc-400 hover:text-zinc-200"}`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Main Layout: Folder Sidebar + Documents View */}
       <div className="flex flex-col lg:flex-row gap-6 items-start">
@@ -615,11 +1000,13 @@ const Documents = () => {
           onSelectFolder={(id) => {
             setSelectedFolderId(id);
             setQuery("");
+            setIsSearchMode(false);
           }}
           activeTab={activeTab}
           onSelectTab={(tab) => {
             setActiveTab(tab);
             setQuery("");
+            setIsSearchMode(false);
           }}
           onOpenCreateModal={(parentId) => {
             setCreateFolderParentId(parentId);
@@ -642,20 +1029,12 @@ const Documents = () => {
                     <button
                       type="button"
                       disabled={isLast || activeTab === "trash"}
-                      onClick={() => {
-                        setSelectedFolderId(crumb.id);
-                      }}
-                      className={`hover:text-white transition-colors ${
-                        isLast
-                          ? "font-semibold text-zinc-100"
-                          : "text-zinc-400 hover:underline"
-                      }`}
+                      onClick={() => setSelectedFolderId(crumb.id)}
+                      className={`hover:text-white transition-colors ${isLast ? "font-semibold text-zinc-100" : "text-zinc-400 hover:underline"}`}
                     >
                       {crumb.name}
                     </button>
-                    {!isLast && (
-                      <ChevronRight className="h-3 w-3 text-zinc-600" />
-                    )}
+                    {!isLast && <ChevronRight className="h-3 w-3 text-zinc-600" />}
                   </div>
                 );
               })}
@@ -668,21 +1047,19 @@ const Documents = () => {
 
           {/* Documents Table / List */}
           {loading ? (
-            <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-12 text-center text-sm text-zinc-400">
-              Loading documents...
-            </div>
+            <DocumentSkeleton count={6} />
           ) : documents.length === 0 ? (
             <div className="rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 p-12 text-center">
               <FolderOpen className="mx-auto h-8 w-8 text-zinc-600 mb-2" />
               <p className="text-sm font-medium text-zinc-300">
-                {activeTab === "trash"
-                  ? "Trash is empty."
-                  : "No documents in this location."}
+                {activeTab === "trash" ? "Trash is empty." : isSearchMode ? "No results found." : "No documents in this location."}
               </p>
               <p className="text-xs text-zinc-500 mt-1">
                 {activeTab === "trash"
                   ? "Deleted documents will appear here."
-                  : "Upload a PDF, image, or office document to get started."}
+                  : isSearchMode
+                  ? "Try different search terms or adjust filters."
+                  : "Upload a PDF, image, or office document to get started. You can also drag and drop files."}
               </p>
             </div>
           ) : (
@@ -695,8 +1072,7 @@ const Documents = () => {
                     onClick={toggleSelectAll}
                     className="text-zinc-400 hover:text-zinc-200"
                   >
-                    {selectedDocIds.size === documents.length &&
-                    documents.length > 0 ? (
+                    {selectedDocIds.size === documents.length && documents.length > 0 ? (
                       <CheckSquare className="h-4 w-4 text-blue-400" />
                     ) : (
                       <Square className="h-4 w-4" />
@@ -711,217 +1087,266 @@ const Documents = () => {
               <ul className="divide-y divide-zinc-800/80">
                 {documents.map((doc) => {
                   const isSelected = selectedDocIds.has(doc._id);
-                  const folderName = doc.folderId
-                    ? folderNameMap.get(doc.folderId)
-                    : null;
+                  const isHighlighted = highlightId && String(doc._id) === String(highlightId);
+                  const folderName = doc.folderId ? folderNameMap.get(doc.folderId) : null;
+                  const isAiExpanded = expandedAiDocId === doc._id;
 
                   return (
                     <li
                       key={doc._id}
-                      className={`flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 transition-colors ${
-                        isSelected
+                      id={`doc-${doc._id}`}
+                      className={`flex flex-col gap-2 px-4 py-3 transition-colors ${
+                        isHighlighted
+                          ? "bg-blue-950/30 border-l-2 border-blue-500"
+                          : isSelected
                           ? "bg-blue-950/20"
                           : "hover:bg-zinc-800/40"
                       }`}
                     >
-                      <div className="flex items-start sm:items-center gap-3 min-w-0">
-                        <button
-                          type="button"
-                          onClick={() => toggleSelectDoc(doc._id)}
-                          className="mt-1 sm:mt-0 text-zinc-500 hover:text-zinc-300 shrink-0"
-                        >
-                          {isSelected ? (
-                            <CheckSquare className="h-4 w-4 text-blue-400" />
-                          ) : (
-                            <Square className="h-4 w-4" />
-                          )}
-                        </button>
-
-                        <div className="shrink-0 mt-0.5 sm:mt-0">
-                          {getFileIcon(doc.mimeType, doc.name)}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              onClick={() => openDocument(doc)}
-                              className="font-medium text-sm text-zinc-100 hover:text-blue-400 cursor-pointer truncate"
-                            >
-                              {doc.name}
-                            </span>
-
-                            {/* Version Badge (Click opens version history) */}
-                            <button
-                              type="button"
-                              onClick={() => setVersionDoc(doc)}
-                              title="Click to view version history"
-                              className="flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 hover:bg-zinc-700 hover:text-white border border-zinc-700 transition-colors"
-                            >
-                              <History className="h-3 w-3 text-blue-400" />
-                              <span>v{doc.versionCount || 1}</span>
-                            </button>
-
-                            {/* Folder badge if in all files view */}
-                            {selectedFolderId === "all" && folderName && (
-                              <span className="rounded-md bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400 border border-zinc-700/60">
-                                📁 {folderName}
-                              </span>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div className="flex items-start sm:items-center gap-3 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => toggleSelectDoc(doc._id)}
+                            className="mt-1 sm:mt-0 text-zinc-500 hover:text-zinc-300 shrink-0"
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="h-4 w-4 text-blue-400" />
+                            ) : (
+                              <Square className="h-4 w-4" />
                             )}
+                          </button>
 
-                            {/* Department badge */}
-                            {doc.departmentId && (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-md bg-indigo-950/40 px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 border border-indigo-800/50"
-                                title={`Department: ${departmentNameMap.get(doc.departmentId) || "Assigned"}`}
-                              >
-                                <Building2 className="h-2.5 w-2.5 text-indigo-400" />
-                                <span>{departmentNameMap.get(doc.departmentId) || "Department"}</span>
-                              </span>
-                            )}
+                          <div className="shrink-0 mt-0.5 sm:mt-0">
+                            {getFileIcon(doc.mimeType, doc.name)}
                           </div>
 
-                          <p className="text-xs text-zinc-500 mt-0.5">
-                            {doc.aiCategory || doc.mimeType || "file"}
-                            {doc.sizeBytes
-                              ? ` · ${formatBytes(doc.sizeBytes)}`
-                              : ""}
-                            {doc.processing?.embed === "pending"
-                              ? " · AI processing"
-                              : ""}
-                            {doc.processing?.embed === "failed"
-                              ? " · AI failed"
-                              : ""}
-                          </p>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span
+                                onClick={() => openDocument(doc)}
+                                className="font-medium text-sm text-zinc-100 hover:text-blue-400 cursor-pointer truncate"
+                              >
+                                {doc.name}
+                              </span>
 
-                          {(doc.snippet || doc.summary) && (
-                            <p className="mt-1 text-xs text-zinc-400 line-clamp-1">
-                              {doc.snippet || doc.summary}
+                              {/* Version Badge */}
+                              <button
+                                type="button"
+                                onClick={() => setVersionDoc(doc)}
+                                title="Click to view version history"
+                                className="flex items-center gap-1 rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 hover:bg-zinc-700 hover:text-white border border-zinc-700 transition-colors"
+                              >
+                                <History className="h-3 w-3 text-blue-400" />
+                                <span>v{doc.versionCount || 1}</span>
+                              </button>
+
+                              {/* AI Status Badge (inline) */}
+                              {doc.processing && (
+                                <ProcessingStatusBadge processing={doc.processing} />
+                              )}
+
+                              {/* AI Category Badge */}
+                              {doc.aiCategory && (
+                                <span className="inline-flex items-center gap-1 rounded-md bg-indigo-950/40 px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 border border-indigo-800/50">
+                                  <Sparkles className="h-2.5 w-2.5 text-indigo-400" />
+                                  {doc.aiCategory}
+                                </span>
+                              )}
+
+                              {/* Folder badge */}
+                              {selectedFolderId === "all" && folderName && (
+                                <span className="rounded-md bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400 border border-zinc-700/60">
+                                  📁 {folderName}
+                                </span>
+                              )}
+
+                              {/* Department badge */}
+                              {doc.departmentId && (
+                                <span
+                                  className="inline-flex items-center gap-1 rounded-md bg-indigo-950/40 px-1.5 py-0.5 text-[10px] font-medium text-indigo-300 border border-indigo-800/50"
+                                  title={`Department: ${departmentNameMap.get(doc.departmentId) || "Assigned"}`}
+                                >
+                                  <Building2 className="h-2.5 w-2.5 text-indigo-400" />
+                                  <span>{departmentNameMap.get(doc.departmentId) || "Department"}</span>
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-xs text-zinc-500 mt-0.5">
+                              {doc.mimeType || "file"}
+                              {doc.sizeBytes ? ` · ${formatBytes(doc.sizeBytes)}` : ""}
                             </p>
+
+                            {/* Snippet / Summary with highlighting */}
+                            {(doc.snippet || doc.summary) && (
+                              <p className="mt-1 text-xs text-zinc-400 line-clamp-2">
+                                <HighlightedSnippet
+                                  text={doc.snippet || doc.summary}
+                                  query={isSearchMode ? query : ""}
+                                />
+                              </p>
+                            )}
+
+                            {/* Tags */}
+                            {doc.tags && doc.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {doc.tags.slice(0, 5).map((tag, i) => (
+                                  <span
+                                    key={i}
+                                    className="rounded-md bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400 border border-zinc-700/60"
+                                  >
+                                    #{tag}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Action buttons */}
+                        <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0 flex-wrap">
+                          {activeTab === "files" ? (
+                            <>
+                              {/* AI Intelligence toggle */}
+                              <button
+                                title="View AI intelligence panel"
+                                type="button"
+                                onClick={() => setExpandedAiDocId(isAiExpanded ? null : doc._id)}
+                                className={`flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs transition-colors ${isAiExpanded ? "border-indigo-600/50 bg-indigo-600/10 text-indigo-300" : "border-zinc-700/80 bg-zinc-800/80 text-zinc-200 hover:bg-zinc-700 hover:text-indigo-400"}`}
+                              >
+                                <Brain className="h-3.5 w-3.5" />
+                                <span className="hidden sm:inline">AI</span>
+                                {isAiExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                              </button>
+
+                              <button
+                                title="Preview document in new tab"
+                                type="button"
+                                onClick={() => openDocument(doc)}
+                                className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Eye className="h-3.5 w-3.5 text-blue-400" />
+                                <span className="hidden sm:inline">Open</span>
+                              </button>
+
+                              <button
+                                title="Download document"
+                                type="button"
+                                onClick={() => downloadDocument(doc)}
+                                className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Download className="h-3.5 w-3.5 text-zinc-300" />
+                                <span className="hidden sm:inline">Download</span>
+                              </button>
+
+                              <button
+                                title="Upload new version"
+                                type="button"
+                                onClick={() => setVersionDoc(doc)}
+                                className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Upload className="h-3.5 w-3.5 text-emerald-400" />
+                                <span className="hidden md:inline">New Version</span>
+                              </button>
+
+                              <Link
+                                to={`/app/chat?documentId=${doc._id}`}
+                                title="Chat with document AI"
+                                className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
+                                <span className="hidden sm:inline">Chat</span>
+                              </Link>
+
+                              <button
+                                title="Share link"
+                                type="button"
+                                onClick={() => setShareLinkDoc(doc)}
+                                className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Link2 className="h-3.5 w-3.5 text-emerald-400" />
+                              </button>
+
+                              <button
+                                title="Activity timeline"
+                                type="button"
+                                onClick={() => setActivityDoc(doc)}
+                                className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Activity className="h-3.5 w-3.5 text-blue-400" />
+                              </button>
+
+                              <button
+                                title="Permissions"
+                                type="button"
+                                onClick={() => setPermissionsDoc(doc)}
+                                className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <Shield className="h-3.5 w-3.5 text-amber-400" />
+                              </button>
+
+                              <button
+                                title="Department"
+                                type="button"
+                                onClick={() => setDepartmentDoc(doc)}
+                                className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:text-indigo-400 hover:bg-zinc-700 transition-colors"
+                              >
+                                <Building2 className="h-3.5 w-3.5" />
+                              </button>
+
+                              <button
+                                title="Move document"
+                                type="button"
+                                onClick={() => setDocsToMove([doc])}
+                                className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                              >
+                                <CornerDownRight className="h-3.5 w-3.5 text-blue-400" />
+                              </button>
+
+                              <button
+                                title="Move to trash"
+                                type="button"
+                                onClick={() => onTrashDoc(doc)}
+                                className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-zinc-700 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                title="Restore document"
+                                type="button"
+                                onClick={() => onRestoreDoc(doc)}
+                                className="flex items-center gap-1 rounded-md border border-emerald-600/30 bg-emerald-600/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-600/20 transition-colors"
+                              >
+                                <RotateCcw className="h-3.5 w-3.5" />
+                                <span>Restore</span>
+                              </button>
+
+                              <button
+                                title="Delete permanently"
+                                type="button"
+                                onClick={() => setPermDeleteConfirmDocs([doc])}
+                                className="flex items-center gap-1 rounded-md border border-rose-600/40 bg-rose-600/20 px-2.5 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-600/30 transition-colors"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                <span>Delete</span>
+                              </button>
+                            </>
                           )}
                         </div>
                       </div>
 
-                      {/* Action buttons */}
-                      <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
-                        {activeTab === "files" ? (
-                          <>
-                            <button
-                              title="Preview document in new tab"
-                              type="button"
-                              onClick={() => openDocument(doc)}
-                              className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <Eye className="h-3.5 w-3.5 text-blue-400" />
-                              <span className="hidden sm:inline">Open</span>
-                            </button>
-
-                            <button
-                              title="Download document"
-                              type="button"
-                              onClick={() => downloadDocument(doc)}
-                              className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <Download className="h-3.5 w-3.5 text-zinc-300" />
-                              <span className="hidden sm:inline">Download</span>
-                            </button>
-
-                            <button
-                              title="Upload new version"
-                              type="button"
-                              onClick={() => setVersionDoc(doc)}
-                              className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <Upload className="h-3.5 w-3.5 text-emerald-400" />
-                              <span className="hidden md:inline">New Version</span>
-                            </button>
-
-                            <Link
-                              to={`/app/chat?documentId=${doc._id}`}
-                              title="Chat with document AI"
-                              className="flex items-center gap-1 rounded-md border border-zinc-700/80 bg-zinc-800/80 px-2.5 py-1.5 text-xs text-zinc-200 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <MessageSquare className="h-3.5 w-3.5 text-emerald-400" />
-                              <span className="hidden sm:inline">Chat</span>
-                            </Link>
-
-                            <button
-                              title="Share link"
-                              type="button"
-                              onClick={() => setShareLinkDoc(doc)}
-                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <Link2 className="h-3.5 w-3.5 text-emerald-400" />
-                            </button>
-
-                            <button
-                              title="Activity timeline"
-                              type="button"
-                              onClick={() => setActivityDoc(doc)}
-                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <Activity className="h-3.5 w-3.5 text-blue-400" />
-                            </button>
-
-                            <button
-                              title="Permissions"
-                              type="button"
-                              onClick={() => setPermissionsDoc(doc)}
-                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <Shield className="h-3.5 w-3.5 text-amber-400" />
-                            </button>
-
-                            <button
-                              title="Department"
-                              type="button"
-                              onClick={() => setDepartmentDoc(doc)}
-                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:text-indigo-400 hover:bg-zinc-700 transition-colors"
-                            >
-                              <Building2 className="h-3.5 w-3.5" />
-                            </button>
-
-                            <button
-                              title="Move document"
-                              type="button"
-                              onClick={() => setDocsToMove([doc])}
-                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
-                            >
-                              <CornerDownRight className="h-3.5 w-3.5 text-blue-400" />
-                            </button>
-
-                            <button
-                              title="Move to trash"
-                              type="button"
-                              onClick={() => onTrashDoc(doc)}
-                              className="rounded-md border border-zinc-700/80 bg-zinc-800/80 p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-zinc-700 transition-colors"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              title="Restore document"
-                              type="button"
-                              onClick={() => onRestoreDoc(doc)}
-                              className="flex items-center gap-1 rounded-md border border-emerald-600/30 bg-emerald-600/10 px-2.5 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-600/20 transition-colors"
-                            >
-                              <RotateCcw className="h-3.5 w-3.5" />
-                              <span>Restore</span>
-                            </button>
-
-                            <button
-                              title="Delete permanently"
-                              type="button"
-                              onClick={() => setPermDeleteConfirmDocs([doc])}
-                              className="flex items-center gap-1 rounded-md border border-rose-600/40 bg-rose-600/20 px-2.5 py-1.5 text-xs font-medium text-rose-300 hover:bg-rose-600/30 transition-colors"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                              <span>Delete</span>
-                            </button>
-                          </>
-                        )}
-                      </div>
+                      {/* AI Panel — shown when AI button clicked */}
+                      {isAiExpanded && activeTab === "files" && (
+                        <AiPanel
+                          doc={doc}
+                          workspaceId={currentWorkspaceId}
+                          onReprocessed={handleDocReprocessed}
+                        />
+                      )}
                     </li>
                   );
                 })}
@@ -948,9 +1373,7 @@ const Documents = () => {
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2 truncate">
               <FileText className="h-4 w-4 text-blue-400 shrink-0" />
-              <p className="font-medium text-sm text-zinc-100 truncate">
-                {preview.name}
-              </p>
+              <p className="font-medium text-sm text-zinc-100 truncate">{preview.name}</p>
             </div>
             <div className="flex items-center gap-2">
               <a
@@ -1106,6 +1529,8 @@ const Documents = () => {
   );
 };
 
+// ─── ChangeDepartmentModal (unchanged from original) ─────────────────────────
+
 const ChangeDepartmentModal = ({
   isOpen,
   onClose,
@@ -1137,9 +1562,7 @@ const ChangeDepartmentModal = ({
       onClose();
       if (onUpdated) onUpdated();
     } catch (err) {
-      toast.error(
-        err?.response?.data?.message || "Failed to update document department"
-      );
+      toast.error(err?.response?.data?.message || "Failed to update document department");
     } finally {
       setSaving(false);
     }

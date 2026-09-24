@@ -95,7 +95,12 @@ export const sendChatMessage = TryCatch(async (req, res) => {
 
   let allowed = await allowedDocumentIds(req.workspace._id);
   if (session.scope === "document" && session.documentId) {
+    // Single-document scoped session (original behavior)
     allowed = allowed.filter((id) => id === String(session.documentId));
+  } else if (req.body.documentIds && Array.isArray(req.body.documentIds) && req.body.documentIds.length > 0) {
+    // Multi-document scoped chat: filter allowed to only the requested document IDs
+    const requestedIds = new Set(req.body.documentIds.map(String));
+    allowed = allowed.filter((id) => requestedIds.has(id));
   }
 
   const prior = await ChatMessage.find({ sessionId: session._id })

@@ -8,6 +8,7 @@ import { Workspace } from "../models/Workspace.js";
 import { Department } from "../models/Department.js";
 import { PermissionGrant } from "../models/PermissionGrant.js";
 import { DEFAULT_CATEGORIES } from "../constants/permissions.js";
+import { AiJob } from "../models/AiJob.js";
 import { hasDocumentPermission } from "../middlewares/checkPermission.js";
 import {
   copyObject,
@@ -1416,3 +1417,117 @@ export const updateDocumentCategory = TryCatch(async (req, res) => {
   });
 });
 
+/**
+ * POST /api/workspaces/:workspaceId/documents/:documentId/reprocess
+ *
+ * Re-triggers AI processing for the current version of a document.
+ * Resets processing state on the DocumentVersion and re-enqueues the AI job.
+ * Clears stale aiCategory, aiKeywords, summary so fresh results will populate.
+ */
+export const reprocessDocument = TryCatch(async (req, res) => {
+  const { documentId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(documentId)) {
+    return res.status(400).json({ message: "Invalid document id" });
+  }
+
+  const document = await Document.findOne({
+    _id: documentId,
+    workspaceId: req.workspace._id,
+    status: "active",
+  });
+
+  if (!document) {
+    return res.status(404).json({ message: "Document not found" });
+  }
+
+  if (!document.currentVersionId) {
+    return res.status(400).json({ message: "Document has no current version to reprocess" });
+  }
+
+  const version = await DocumentVersion.findById(document.currentVersionId);
+  if (!version?.s3Key) {
+    return res.status(400).json({ message: "No processable file found for this document" });
+  }
+
+  // Reset processing state on the version
+  version.processing = { extract: "pending", embed: "pending", classify: "pending" };
+  await version.save();
+
+  // Clear stale AI fields from document so UI shows pending state
+  document.aiCategory = undefined;
+  document.aiKeywords = [];
+  document.summary = undefined;
+  document.updatedBy = req.user._id;
+  await document.save();
+
+  // Re-enqueue the AI job using the existing pipeline
+  const { enqueueProcessJob } = await import("../services/aiJobs.js");
+  enqueueProcessJob({
+    workspace: req.workspace,
+    document,
+    version,
+  }).catch((err) => console.error("Failed to enqueue reprocess AI job:", err.message));
+
+  logAuditEvent({
+    workspaceId: req.workspace._id,
+    actor: req.user,
+    action: "document.reprocess",
+    resourceType: "document",
+    resourceId: document._id,
+    metadata: { name: document.name },
+  });
+
+  // Reload to get fresh populated processing state
+  const refreshed = await Document.findById(document._id).populate("currentVersionId", "processing");
+  res.json({
+    message: "Reprocessing started",
+    document: serializeDocument(refreshed),
+  });
+});
+
+/**
+ * GET /api/workspaces/:workspaceId/documents/:documentId/ai-status
+ *
+ * Returns the latest AiJob record for a document so the frontend
+ * can poll for real-time processing status (queued | running | ready | failed).
+ */
+export const getDocumentAiStatus = TryCatch(async (req, res) => {
+  const { documentId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(documentId)) {
+    return res.status(400).json({ message: "Invalid document id" });
+  }
+
+  const document = await Document.findOne({
+    _id: documentId,
+    workspaceId: req.workspace._id,
+  });
+
+  if (!document) {
+    return res.status(404).json({ message: "Document not found" });
+  }
+
+  const latestJob = await AiJob.findOne({ documentId: document._id })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  // Also fetch current version processing sub-state
+  let versionProcessing = null;
+  if (document.currentVersionId) {
+    const version = await DocumentVersion.findById(document.currentVersionId)
+      .select("processing")
+      .lean();
+    versionProcessing = version?.processing || null;
+  }
+
+  res.json({
+    jobStatus: latestJob?.status || null,
+    jobError: latestJob?.error || null,
+    jobUpdatedAt: latestJob?.updatedAt || null,
+    versionProcessing,
+    aiCategory: document.aiCategory || null,
+    aiKeywords: document.aiKeywords || [],
+    summary: document.summary || null,
+  });
+});

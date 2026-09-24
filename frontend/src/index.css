@@ -1,1 +1,86 @@
 @import "tailwindcss";
+
+/* ===================================================================
+   Dark/Light theme variables
+   Applied via data-theme="light" on <html> by AppLayout theme toggle.
+   The dark variant is the default (zinc-950 background).
+=================================================================== */
+[data-theme="light"] {
+  --bg-base: #f4f4f5;
+  --bg-surface: #ffffff;
+  --bg-surface-alt: #f1f5f9;
+  --border-color: #e4e4e7;
+  --text-primary: #18181b;
+  --text-secondary: #52525b;
+  --text-muted: #a1a1aa;
+}
+
+/* Light theme overrides — only activate when data-theme="light" is set */
+[data-theme="light"] .min-h-screen {
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] header {
+  background-color: rgba(255,255,255,0.9);
+  border-color: var(--border-color);
+}
+
+[data-theme="light"] .bg-zinc-950 { background-color: var(--bg-base); }
+[data-theme="light"] .bg-zinc-900 { background-color: var(--bg-surface); }
+[data-theme="light"] .bg-zinc-900\/80 { background-color: var(--bg-surface); }
+[data-theme="light"] .bg-zinc-900\/50 { background-color: rgba(255,255,255,0.7); }
+[data-theme="light"] .bg-zinc-800 { background-color: var(--bg-surface-alt); }
+[data-theme="light"] .bg-zinc-800\/40 { background-color: rgba(241,245,249,0.4); }
+[data-theme="light"] .border-zinc-800 { border-color: var(--border-color); }
+[data-theme="light"] .border-zinc-700 { border-color: #d4d4d8; }
+[data-theme="light"] .text-zinc-100 { color: var(--text-primary); }
+[data-theme="light"] .text-zinc-200 { color: var(--text-primary); }
+[data-theme="light"] .text-zinc-300 { color: var(--text-secondary); }
+[data-theme="light"] .text-zinc-400 { color: var(--text-muted); }
+[data-theme="light"] .text-zinc-500 { color: #a1a1aa; }
+
+/* ===================================================================
+   Skeleton animation pulse (enhanced for staggered rows)
+=================================================================== */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.skeleton-row {
+  animation: skeleton-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* ===================================================================
+   Drag-and-drop upload zone highlight
+=================================================================== */
+.drag-over {
+  border-color: #3b82f6 !important;
+  background-color: rgba(59, 130, 246, 0.06) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+  transition: all 0.15s ease;
+}
+
+.drag-zone {
+  transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+/* ===================================================================
+   Snippet highlight marks (search result text highlighting)
+=================================================================== */
+mark.search-highlight {
+  background-color: rgba(250, 204, 21, 0.25);
+  color: #fbbf24;
+  border-radius: 2px;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
+/* ===================================================================
+   AI processing status badge colours
+=================================================================== */
+.status-pending  { color: #f59e0b; background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+.status-running  { color: #60a5fa; background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.3); }
+.status-ready    { color: #34d399; background: rgba(52,211,153,0.12); border-color: rgba(52,211,153,0.3); }
+.status-failed   { color: #f87171; background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.3); }
