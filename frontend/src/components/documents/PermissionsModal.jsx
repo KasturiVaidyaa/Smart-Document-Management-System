@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { toast } from "react-toastify";
 import api from "../../utils/api";
+import { useWorkspace } from "../../context/WorkspaceContext";
 
 const ACTIONS = ["view", "edit", "download", "share", "delete"];
 
@@ -42,6 +43,7 @@ export const PermissionsModal = ({
   document,
   workspaceId,
 }) => {
+  const { current: currentWorkspace } = useWorkspace();
   const [directGrants, setDirectGrants] = useState([]);
   const [inheritedGrants, setInheritedGrants] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -279,9 +281,13 @@ export const PermissionsModal = ({
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-blue-500 focus:outline-none"
                 >
                   <option value="user">User</option>
-                  <option value="role">Role</option>
-                  <option value="department">Department</option>
-                  <option value="workspace">Everyone in workspace</option>
+                  {currentWorkspace?.workspace?.type !== "personal" && (
+                    <>
+                      <option value="role">Role</option>
+                      <option value="department">Department</option>
+                      <option value="workspace">Everyone in workspace</option>
+                    </>
+                  )}
                 </select>
               </div>
 

@@ -90,6 +90,55 @@ class GeminiLLMProvider(BaseLLMProvider):
                 logger.warning("Gemini chat model %s failed: %s", model, exc)
         raise last_error or RuntimeError("Gemini chat failed")
 
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 1500,
+    ):
+        contents: list[types.Content] = []
+        system_instruction: str | None = None
+
+        for msg in messages:
+            role = msg["role"]
+            text = msg["content"]
+            if role == "system":
+                system_instruction = text
+            elif role == "user":
+                contents.append(
+                    types.Content(role="user", parts=[types.Part(text=text)])
+                )
+            elif role == "assistant":
+                contents.append(
+                    types.Content(role="model", parts=[types.Part(text=text)])
+                )
+
+        config = types.GenerateContentConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens,
+        )
+        if system_instruction:
+            config.system_instruction = system_instruction
+
+        last_error: Exception | None = None
+        for model in _model_candidates(self._resolved_model or self._model, _CHAT_FALLBACKS):
+            try:
+                response_stream = await self._client.aio.models.generate_content_stream(
+                    model=model,
+                    contents=contents,
+                    config=config,
+                )
+                self._resolved_model = model
+                async for chunk in response_stream:
+                    if chunk.text:
+                        yield chunk.text
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning("Gemini chat_stream model %s failed: %s", model, exc)
+        raise last_error or RuntimeError("Gemini chat_stream failed")
+
 
 class GeminiEmbedProvider(BaseEmbedProvider):
     """Embeddings via the current Gemini embedContent models."""

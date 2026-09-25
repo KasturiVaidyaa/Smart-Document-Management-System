@@ -33,13 +33,18 @@ export const WorkspaceProvider = ({ children }) => {
       setPersonalWorkspaceId(data.personalWorkspaceId);
       const saved = localStorage.getItem("currentWorkspaceId");
       const ids = (data.workspaces || []).map((w) => String(w.workspace._id));
+      const personalId = data.personalWorkspaceId ? String(data.personalWorkspaceId) : null;
+
+      // If saved ID no longer exists in the list, discard it (stale/deleted workspace)
+      const savedValid = saved && ids.includes(saved) ? saved : null;
+
       const next =
-        (saved && ids.includes(saved) && saved) ||
-        (data.personalWorkspaceId && ids.includes(String(data.personalWorkspaceId))
-          ? String(data.personalWorkspaceId)
-          : ids[0] || "");
+        savedValid ||
+        (personalId && ids.includes(personalId) ? personalId : ids[0] || "");
+
       setCurrentWorkspaceId(next);
       if (next) localStorage.setItem("currentWorkspaceId", next);
+      else localStorage.removeItem("currentWorkspaceId");
     } catch (error) {
       toast.error(error?.response?.data?.message || "Failed to load workspaces");
     } finally {

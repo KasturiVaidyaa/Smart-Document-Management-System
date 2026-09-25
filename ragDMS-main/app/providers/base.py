@@ -16,6 +16,17 @@ class BaseLLMProvider(ABC):
         """Send a chat completion request and return the assistant's response text."""
         ...
 
+    @abstractmethod
+    async def chat_stream(
+        self,
+        messages: list[dict[str, str]],
+        *,
+        temperature: float = 0.3,
+        max_tokens: int = 1500,
+    ):
+        """Send a chat completion request and yield the assistant's response text in chunks."""
+        ...
+
 
 class BaseEmbedProvider(ABC):
     """Abstract embedding provider."""

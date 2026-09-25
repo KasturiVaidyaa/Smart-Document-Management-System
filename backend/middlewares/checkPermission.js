@@ -82,6 +82,9 @@ export const checkDocumentPermission = (requiredAction) => async (req, res, next
     // Users with sharing.manage role permission also bypass
     if (req.authz?.permissions?.includes("sharing.manage")) return next();
 
+    // Implicitly grant view access to all workspace members
+    if (requiredAction === "view") return next();
+
     const documentId = req.params.documentId;
     if (!documentId || !mongoose.Types.ObjectId.isValid(documentId)) {
       return res.status(400).json({ message: "Invalid document id" });
@@ -180,6 +183,9 @@ export async function hasDocumentPermission({ userId, workspaceId, documentId, a
   // Personal workspace bypass
   if (workspace.type === "personal") return true;
 
+  // Implicitly grant view access to all workspace members
+  if (action === "view") return true;
+
   const resourceChain = await buildResourceChain(document);
 
   const principals = [];
@@ -219,9 +225,12 @@ export async function hasDocumentPermission({ userId, workspaceId, documentId, a
     }
   }
 
+  // Guard: if no conditions were built, deny access
+  if (orConditions.length === 0) return false;
+
   const grant = await PermissionGrant.findOne({
-    $or: orConditions,
     $and: [
+      { $or: orConditions },
       {
         $or: [
           { expiresAt: null },

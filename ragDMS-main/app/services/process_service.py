@@ -216,6 +216,8 @@ async def _classify_category(
             temperature=0.1,
             max_tokens=50,
         )
+        # Strip <think> tags from thinking models
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL)
         result = result.strip().strip('"').strip("'")
         # Validate the response is one of the given categories
         for cat in categories:
@@ -239,6 +241,8 @@ async def _extract_keywords(texts: list[str], llm: BaseLLMProvider) -> list[str]
             temperature=0.2,
             max_tokens=200,
         )
+        # Strip <think> tags from thinking models
+        result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL)
         # Parse JSON array from response
         result = result.strip()
         # Handle markdown code blocks

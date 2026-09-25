@@ -33,6 +33,11 @@ export const createPermission = TryCatch(async (req, res) => {
     return res.status(400).json({ message: "principalType must be 'user', 'role', 'department', or 'workspace'" });
   }
 
+  // Personal workspaces only support user-to-user sharing
+  if (req.workspace.type === "personal" && principalType !== "user") {
+    return res.status(400).json({ message: "Personal workspaces only support user-level permissions" });
+  }
+
   // principalId is required for all types except "workspace"
   if (principalType !== "workspace") {
     if (!principalId || !mongoose.Types.ObjectId.isValid(principalId)) {

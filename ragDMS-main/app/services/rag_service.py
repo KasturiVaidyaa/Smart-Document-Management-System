@@ -1,6 +1,7 @@
 """RAG chat service — vector search → LLM answer with citations."""
 from __future__ import annotations
 
+import json
 import logging
 import re
 from typing import Any
@@ -144,7 +145,7 @@ async def chat(
     logger.info("Retrieved %d chunks for query in workspace=%s", len(chunks), workspace_id)
 
     # --- Step 5: Build context ---
-    context = _build_context(chunks)
+    context = await _build_context(db, chunks)
 
     # --- Step 6: Build messages ---
     history_block = _build_history_block(history)
@@ -162,7 +163,7 @@ async def chat(
         answer = await llm.chat(
             messages,
             temperature=0.3,
-            max_tokens=1500,
+            max_tokens=4000,
         )
         answer = _clean_response(answer)
     except Exception:
@@ -196,6 +197,100 @@ async def chat(
         "citedChunks": cited_chunks,
         "refused": False,
     }
+
+
+
+async def chat_stream(
+    *,
+    workspace_id: str,
+    session_id: str | None,
+    allowed_document_ids: list[str],
+    question: str,
+    history: list[dict[str, str]],
+    db: AsyncIOMotorDatabase,
+    llm: BaseLLMProvider,
+    embedder: BaseEmbedProvider,
+):
+    """Streaming equivalent of chat(). Yields JSON strings for each event."""
+    settings = get_settings()
+
+    if _CONVERSATIONAL_RE.match(question.strip()):
+        prompt = CONVERSATIONAL_PROMPT.format(question=question)
+        yield json.dumps({"type": "meta", "citedDocumentIds": [], "citedChunks": [], "refused": False}) + "\n"
+        try:
+            async for chunk in llm.chat_stream([{"role": "user", "content": prompt}], temperature=0.7, max_tokens=200):
+                if chunk:
+                    yield json.dumps({"type": "text", "content": _clean_response_chunk(chunk)}) + "\n"
+        except Exception:
+            yield json.dumps({"type": "text", "content": "Hello! 👋 I'm your document assistant. Feel free to ask me anything about the documents in this workspace."}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+        return
+
+    if not allowed_document_ids:
+        yield json.dumps({"type": "meta", "citedDocumentIds": [], "citedChunks": [], "refused": True}) + "\n"
+        yield json.dumps({"type": "text", "content": _REFUSAL}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+        return
+
+    ws_oid = ObjectId(workspace_id)
+    doc_oids = [ObjectId(did) for did in allowed_document_ids]
+
+    try:
+        query_embeddings = await embedder.embed([question])
+    except Exception:
+        yield json.dumps({"type": "meta", "citedDocumentIds": [], "citedChunks": [], "refused": True}) + "\n"
+        yield json.dumps({"type": "text", "content": "The embedding model is unavailable. Check GEMINI_EMBED_MODEL and restart the AI service."}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+        return
+
+    if not query_embeddings:
+        yield json.dumps({"type": "meta", "citedDocumentIds": [], "citedChunks": [], "refused": True}) + "\n"
+        yield json.dumps({"type": "text", "content": _REFUSAL}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+        return
+
+    chunks = await _vector_search(
+        db=db,
+        query_vector=query_embeddings[0],
+        workspace_id=ws_oid,
+        document_ids=doc_oids,
+        top_k=settings.rag_top_k,
+        similarity_threshold=settings.rag_similarity_threshold,
+    )
+
+    if not chunks:
+        yield json.dumps({"type": "meta", "citedDocumentIds": [], "citedChunks": [], "refused": True}) + "\n"
+        yield json.dumps({"type": "text", "content": _REFUSAL}) + "\n"
+        yield json.dumps({"type": "done"}) + "\n"
+        return
+
+    context = await _build_context(db, chunks)
+    history_block = _build_history_block(history)
+    system_prompt = RAG_SYSTEM_PROMPT.format(context=context, history_block=history_block, question=question)
+
+    cited_doc_ids = _extract_cited_doc_ids(chunks)
+    cited_chunks = [
+        {
+            "documentId": str(c["documentId"]),
+            "chunkIndex": c["chunkIndex"],
+            "page": c.get("page"),
+            "heading": c.get("heading"),
+            "text": c["text"][:300],
+            "score": c.get("score", 0.0),
+        }
+        for c in chunks
+    ]
+
+    yield json.dumps({"type": "meta", "citedDocumentIds": cited_doc_ids, "citedChunks": cited_chunks, "refused": False}) + "\n"
+
+    try:
+        async for chunk in llm.chat_stream([{"role": "user", "content": system_prompt}], temperature=0.3, max_tokens=4000):
+            if chunk:
+                yield json.dumps({"type": "text", "content": _clean_response_chunk(chunk)}) + "\n"
+    except Exception:
+        yield json.dumps({"type": "error", "content": "I encountered an error processing your question."}) + "\n"
+    
+    yield json.dumps({"type": "done"}) + "\n"
 
 
 async def search(
@@ -349,18 +444,30 @@ async def _cosine_search(
     return [doc for _, doc in scored[:top_k]]
 
 
-def _build_context(chunks: list[dict]) -> str:
+async def _build_context(db: AsyncIOMotorDatabase, chunks: list[dict]) -> str:
     """Format retrieved chunks into a context string for the LLM prompt."""
+    
+    # Fetch document names
+    doc_ids = list({ObjectId(str(c.get("documentId"))) for c in chunks if c.get("documentId")})
+    doc_names = {}
+    if doc_ids:
+        docs = await db.documents.find(
+            {"_id": {"$in": doc_ids}},
+            {"name": 1}
+        ).to_list(None)
+        doc_names = {str(d["_id"]): d.get("name", "Unknown Document") for d in docs}
+
     parts: list[str] = []
     for i, c in enumerate(chunks):
         doc_id = str(c.get("documentId", ""))
+        doc_name = doc_names.get(doc_id, f"Doc-{doc_id[-8:]}") if doc_id else "Unknown Document"
         page = c.get("page", "?")
         heading = c.get("heading") or ""
         kind = c.get("kind", "paragraph")
         score = c.get("score", 0.0)
 
         header_parts = [f"[Chunk {i}]"]
-        header_parts.append(f"(Doc: {doc_id[-8:]}, Page {page})")
+        header_parts.append(f"(Doc: {doc_name}, Page {page})")
         if heading:
             header_parts.append(f"[{heading}]")
         if kind == "table":
@@ -400,8 +507,6 @@ def _extract_cited_doc_ids(chunks: list[dict]) -> list[str]:
 
 def _clean_response(text: str) -> str:
     """Clean LLM response: strip preamble and thinking tags."""
-    import re
-
     # Remove <think> tags
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
@@ -415,3 +520,168 @@ def _clean_response(text: str) -> str:
     text = preamble_re.sub("", text).lstrip()
 
     return text
+
+
+def _clean_response_chunk(text: str) -> str:
+    """Light cleaning for streamed chunks — avoid breaking words."""
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Higher-level RAG utilities (called by Express via dedicated endpoints)
+# ---------------------------------------------------------------------------
+
+
+async def summarize_documents(
+    *,
+    workspace_id: str,
+    document_ids: list[str],
+    prompt: str,
+    db: AsyncIOMotorDatabase,
+    llm: BaseLLMProvider,
+    embedder: BaseEmbedProvider,
+) -> dict[str, Any]:
+    """Summarize one or more documents by gathering their top chunks."""
+    if not document_ids:
+        return {"summary": "No documents provided.", "refused": True}
+
+    ws_oid = ObjectId(workspace_id)
+    doc_oids = [ObjectId(did) for did in document_ids]
+
+    # Grab representative chunks for each document (up to 8 per doc, 40 total)
+    per_doc = min(8, 40 // max(len(doc_oids), 1))
+    all_chunks: list[dict] = []
+    for doc_oid in doc_oids:
+        cursor = db.document_chunks.find(
+            {"workspaceId": ws_oid, "documentId": doc_oid},
+            {"text": 1, "page": 1, "heading": 1, "documentId": 1, "chunkIndex": 1},
+        ).sort("chunkIndex", 1).limit(per_doc)
+        async for chunk in cursor:
+            all_chunks.append(chunk)
+
+    if not all_chunks:
+        return {"summary": "No indexed content found for these documents.", "refused": True}
+
+    context = await _build_context(db, all_chunks)
+    system_prompt = (
+        f"You are a document summarization assistant.\n\n"
+        f"DOCUMENT CHUNKS:\n{context}\n\n"
+        f"USER REQUEST: {prompt}\n\n"
+        f"Provide a thorough, well-structured summary. Use bullet points or "
+        f"sections when appropriate. Do not include any preamble."
+    )
+
+    try:
+        answer = await llm.chat(
+            [{"role": "user", "content": system_prompt}],
+            temperature=0.3,
+            max_tokens=2000,
+        )
+        answer = _clean_response(answer)
+    except Exception:
+        logger.exception("Summarize LLM call failed")
+        return {"summary": "AI summarization failed. Please try again.", "refused": True}
+
+    return {"summary": answer, "refused": False}
+
+
+async def suggest_tags(
+    *,
+    workspace_id: str,
+    document_id: str,
+    db: AsyncIOMotorDatabase,
+    llm: BaseLLMProvider,
+) -> dict[str, Any]:
+    """Suggest tags/keywords for a single document using its stored chunks."""
+    ws_oid = ObjectId(workspace_id)
+    doc_oid = ObjectId(document_id)
+
+    cursor = db.document_chunks.find(
+        {"workspaceId": ws_oid, "documentId": doc_oid},
+        {"text": 1},
+    ).sort("chunkIndex", 1).limit(10)
+
+    texts: list[str] = []
+    async for chunk in cursor:
+        texts.append(chunk.get("text", ""))
+
+    if not texts:
+        return {"tags": [], "refused": True}
+
+    combined = "\n\n".join(texts)[:6000]  # cap at ~6k chars
+
+    from app.services.prompts import KEYWORDS_PROMPT
+    prompt = KEYWORDS_PROMPT.format(text=combined)
+
+    try:
+        answer = await llm.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.2,
+            max_tokens=300,
+        )
+        # Clean <think> tags first
+        answer = _clean_response(answer)
+        answer = answer.strip()
+        # Try to extract JSON array
+        match = re.search(r"\[.*?\]", answer, re.DOTALL)
+        if match:
+            tags = json.loads(match.group(0))
+            if isinstance(tags, list):
+                return {"tags": [str(t).strip() for t in tags if str(t).strip()], "refused": False}
+        return {"tags": [], "refused": False}
+    except Exception:
+        logger.exception("Suggest tags LLM call failed")
+        return {"tags": [], "refused": True}
+
+
+async def classify_document(
+    *,
+    workspace_id: str,
+    document_id: str,
+    categories: list[str],
+    db: AsyncIOMotorDatabase,
+    llm: BaseLLMProvider,
+) -> dict[str, Any]:
+    """Classify a document into one of the given categories."""
+    ws_oid = ObjectId(workspace_id)
+    doc_oid = ObjectId(document_id)
+
+    cursor = db.document_chunks.find(
+        {"workspaceId": ws_oid, "documentId": doc_oid},
+        {"text": 1},
+    ).sort("chunkIndex", 1).limit(6)
+
+    texts: list[str] = []
+    async for chunk in cursor:
+        texts.append(chunk.get("text", ""))
+
+    if not texts:
+        return {"category": "General", "refused": True}
+
+    combined = "\n\n".join(texts)[:4000]
+
+    if not categories:
+        categories = ["HR", "Finance", "Projects", "Legal", "General"]
+
+    from app.services.prompts import CATEGORIZE_PROMPT
+    prompt = CATEGORIZE_PROMPT.format(
+        categories="\n".join(f"- {c}" for c in categories),
+        text=combined,
+    )
+
+    try:
+        answer = await llm.chat(
+            [{"role": "user", "content": prompt}],
+            temperature=0.1,
+            max_tokens=50,
+        )
+        answer = _clean_response(answer)
+        category = answer.strip().split("\n")[0].strip()
+        # Validate it's one of the known categories
+        if category not in categories:
+            category = "General"
+        return {"category": category, "refused": False}
+    except Exception:
+        logger.exception("Classify LLM call failed")
+        return {"category": "General", "refused": True}
+

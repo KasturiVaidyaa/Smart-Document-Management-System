@@ -1,86 +1,177 @@
 @import "tailwindcss";
 
-/* ===================================================================
-   Dark/Light theme variables
-   Applied via data-theme="light" on <html> by AppLayout theme toggle.
-   The dark variant is the default (zinc-950 background).
-=================================================================== */
-[data-theme="light"] {
-  --bg-base: #f4f4f5;
-  --bg-surface: #ffffff;
-  --bg-surface-alt: #f1f5f9;
-  --border-color: #e4e4e7;
-  --text-primary: #18181b;
-  --text-secondary: #52525b;
-  --text-muted: #a1a1aa;
+/* ─── Google Fonts ─────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  color-scheme: dark;
+  background: #09090b;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Light theme overrides — only activate when data-theme="light" is set */
-[data-theme="light"] .min-h-screen {
-  background-color: var(--bg-base);
-  color: var(--text-primary);
+* {
+  box-sizing: border-box;
 }
 
-[data-theme="light"] header {
-  background-color: rgba(255,255,255,0.9);
-  border-color: var(--border-color);
+html {
+  min-width: 320px;
+  background: #09090b;
 }
 
-[data-theme="light"] .bg-zinc-950 { background-color: var(--bg-base); }
-[data-theme="light"] .bg-zinc-900 { background-color: var(--bg-surface); }
-[data-theme="light"] .bg-zinc-900\/80 { background-color: var(--bg-surface); }
-[data-theme="light"] .bg-zinc-900\/50 { background-color: rgba(255,255,255,0.7); }
-[data-theme="light"] .bg-zinc-800 { background-color: var(--bg-surface-alt); }
-[data-theme="light"] .bg-zinc-800\/40 { background-color: rgba(241,245,249,0.4); }
-[data-theme="light"] .border-zinc-800 { border-color: var(--border-color); }
-[data-theme="light"] .border-zinc-700 { border-color: #d4d4d8; }
-[data-theme="light"] .text-zinc-100 { color: var(--text-primary); }
-[data-theme="light"] .text-zinc-200 { color: var(--text-primary); }
-[data-theme="light"] .text-zinc-300 { color: var(--text-secondary); }
-[data-theme="light"] .text-zinc-400 { color: var(--text-muted); }
-[data-theme="light"] .text-zinc-500 { color: #a1a1aa; }
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  overflow-x: hidden;
+  background: #09090b;
+  color: #f4f4f5;
+}
 
-/* ===================================================================
-   Skeleton animation pulse (enhanced for staggered rows)
-=================================================================== */
+button,
+select,
+input,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+select,
+label {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #3f3f46;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+/* ─── Skeleton animation ─────────────────────────────────────────── */
 @keyframes skeleton-pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  50%       { opacity: 0.35; }
 }
-
 .skeleton-row {
   animation: skeleton-pulse 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* ===================================================================
-   Drag-and-drop upload zone highlight
-=================================================================== */
+/* ─── Drag-and-drop zone ─────────────────────────────────────────── */
 .drag-over {
   border-color: #3b82f6 !important;
   background-color: rgba(59, 130, 246, 0.06) !important;
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
   transition: all 0.15s ease;
 }
-
 .drag-zone {
   transition: border-color 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-/* ===================================================================
-   Snippet highlight marks (search result text highlighting)
-=================================================================== */
+/* ─── Search highlight ───────────────────────────────────────────── */
 mark.search-highlight {
-  background-color: rgba(250, 204, 21, 0.25);
+  background-color: rgba(250, 204, 21, 0.22);
   color: #fbbf24;
   border-radius: 2px;
   padding: 0 1px;
   font-weight: 600;
 }
 
-/* ===================================================================
-   AI processing status badge colours
-=================================================================== */
-.status-pending  { color: #f59e0b; background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
-.status-running  { color: #60a5fa; background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.3); }
-.status-ready    { color: #34d399; background: rgba(52,211,153,0.12); border-color: rgba(52,211,153,0.3); }
-.status-failed   { color: #f87171; background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.3); }
+/* ─── AI status badges ───────────────────────────────────────────── */
+.status-pending { color: #f59e0b; background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.3); }
+.status-running { color: #60a5fa; background: rgba(96,165,250,0.12); border-color: rgba(96,165,250,0.3); }
+.status-ready   { color: #34d399; background: rgba(52,211,153,0.12); border-color: rgba(52,211,153,0.3); }
+.status-failed  { color: #f87171; background: rgba(248,113,113,0.12); border-color: rgba(248,113,113,0.3); }
+
+/* ─── Context menu ───────────────────────────────────────────────── */
+.ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 200px;
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 10px;
+  padding: 4px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 4px 16px rgba(0,0,0,0.4);
+  animation: ctx-appear 0.12s ease;
+}
+@keyframes ctx-appear {
+  from { opacity: 0; transform: scale(0.95) translateY(-4px); }
+  to   { opacity: 1; transform: scale(1)   translateY(0); }
+}
+.ctx-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #d4d4d8;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s, color 0.1s;
+}
+.ctx-item:hover { background: #27272a; color: #fff; }
+.ctx-item.danger { color: #f87171; }
+.ctx-item.danger:hover { background: rgba(239,68,68,0.12); color: #f87171; }
+.ctx-separator {
+  height: 1px;
+  background: #27272a;
+  margin: 4px 0;
+}
+
+/* ─── Dropdown (workspace switcher, etc.) ────────────────────────── */
+.dropdown-panel {
+  background: #18181b;
+  border: 1px solid #27272a;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  animation: ctx-appear 0.12s ease;
+}
+
+/* ─── Smooth page transitions ────────────────────────────────────── */
+.page-enter {
+  animation: page-in 0.2s ease;
+}
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ─── Google-Drive-inspired file row ─────────────────────────────── */
+.file-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0 4px;
+  border-radius: 6px;
+  transition: background 0.1s;
+}
+.file-row:hover { background: rgba(255,255,255,0.04); }
+.file-row.selected { background: rgba(59,130,246,0.1); }

@@ -82,7 +82,7 @@ function getNotificationDetails(notification) {
         description: `${payload.requesterName || "A user"} requested access to "${
           payload.documentName || "document"
         }"${payload.message ? `: "${payload.message}"` : "."}`,
-        link: "/app/access-requests",
+        link: "/app/admin",
       };
     case "access_expiring":
     case "link_expiring":

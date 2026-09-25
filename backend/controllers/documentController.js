@@ -20,6 +20,7 @@ import {
   s3Key,
 } from "../services/s3.js";
 import { enqueueProcessJob } from "../services/aiJobs.js";
+import { ragSuggestTags } from "../services/aiService.js";
 import { logAuditEvent } from "../services/auditService.js";
 import { notifyUsers } from "../services/notificationService.js";
 
@@ -1531,3 +1532,38 @@ export const getDocumentAiStatus = TryCatch(async (req, res) => {
     summary: document.summary || null,
   });
 });
+
+/**
+ * POST /api/workspaces/:workspaceId/documents/:documentId/suggest-tags
+ * Ask the AI service to suggest tags for a document.
+ * If ?apply=true, automatically merges suggestions into document.tags.
+ */
+export const suggestDocumentTags = TryCatch(async (req, res) => {
+  const document = await Document.findOne({
+    _id: req.params.documentId,
+    workspaceId: req.workspace._id,
+    status: "active",
+  });
+  if (!document) return res.status(404).json({ message: "Document not found" });
+
+  let suggestions = [];
+  try {
+    const result = await ragSuggestTags({
+      workspaceId: String(req.workspace._id),
+      documentId: String(document._id),
+    });
+    suggestions = result.tags || result.keywords || [];
+  } catch (err) {
+    return res.status(502).json({ message: "AI service unavailable", detail: err.message });
+  }
+
+  // Optionally apply suggestions to the document
+  if (req.query.apply === "true" && suggestions.length > 0) {
+    const merged = Array.from(new Set([...(document.tags || []), ...suggestions]));
+    document.tags = merged;
+    await document.save();
+  }
+
+  res.json({ suggestions, applied: req.query.apply === "true" });
+});
+

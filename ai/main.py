@@ -26,3 +26,15 @@ def process_job(payload: dict, x_internal_token: str | None = Header(default=Non
 def rag_chat(payload: dict, x_internal_token: str | None = Header(default=None)):
     require_internal_token(x_internal_token)
     return {"status": "not_implemented", "answer": None}
+
+
+from fastapi.responses import StreamingResponse
+import json
+
+@app.post("/rag/chat/stream")
+async def rag_chat_stream(payload: dict, x_internal_token: str | None = Header(default=None)):
+    require_internal_token(x_internal_token)
+    async def _stream():
+        yield json.dumps({"type": "text", "content": "You are currently running the dummy AI server (ai/main.py). Please run the real AI server in ragDMS-main/ instead!"}) + "\n"
+        yield json.dumps({"type": "complete", "session": {"_id": payload.get("sessionId")}}) + "\n"
+    return StreamingResponse(_stream(), media_type="application/x-ndjson")

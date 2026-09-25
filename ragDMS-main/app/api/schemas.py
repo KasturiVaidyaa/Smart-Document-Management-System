@@ -95,6 +95,52 @@ class SearchResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Summarize
+# ---------------------------------------------------------------------------
+
+class SummarizeRequest(BaseModel):
+    workspaceId: str = Field(min_length=1, max_length=64)
+    documentIds: list[str] = Field(default_factory=list)
+    prompt: str = Field(default="Summarize the key themes and content of these documents.")
+
+
+class SummarizeResponse(BaseModel):
+    summary: str = ""
+    refused: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Suggest Tags
+# ---------------------------------------------------------------------------
+
+class SuggestTagsRequest(BaseModel):
+    workspaceId: str = Field(min_length=1, max_length=64)
+    documentId: str = Field(min_length=1, max_length=64)
+
+
+class SuggestTagsResponse(BaseModel):
+    tags: list[str] = Field(default_factory=list)
+    refused: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Classify
+# ---------------------------------------------------------------------------
+
+class ClassifyRequest(BaseModel):
+    workspaceId: str = Field(min_length=1, max_length=64)
+    documentId: str = Field(min_length=1, max_length=64)
+    categories: list[str] = Field(
+        default_factory=lambda: ["HR", "Finance", "Projects", "Legal", "General"],
+    )
+
+
+class ClassifyResponse(BaseModel):
+    category: str = "General"
+    refused: bool = False
+
+
+# ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------
 
@@ -103,3 +149,4 @@ class HealthResponse(BaseModel):
     ok: bool = True
     version: str = ""
     provider: str = ""
+

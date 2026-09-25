@@ -1,4 +1,8 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import {
+  createBrowserRouter,
+  RouterProvider,
+  Navigate,
+} from "react-router-dom";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import { UserData } from "./context/UserContext";
@@ -11,16 +15,20 @@ import AppLayout from "./components/AppLayout";
 import Dashboard from "./pages/Dashboard";
 import Documents from "./pages/Documents";
 import Chat from "./pages/Chat";
-import ShareLinkAccess from "./pages/ShareLinkAccess";
-import AccessRequestsPanel from "./components/documents/AccessRequestsPanel";
 import WorkspaceAdmin from "./pages/WorkspaceAdmin";
+import ShareLinkAccess from "./pages/ShareLinkAccess";
 import ErrorBoundary from "./components/ErrorBoundary";
 
-const Protected = ({ children }) => {
+// ── Auth guards ────────────────────────────────────────────────────
+const Protected = () => {
   const { isAuth, loading } = UserData();
   if (loading) return <Loading />;
   if (!isAuth) return <Navigate to="/login" replace />;
-  return children;
+  return (
+    <WorkspaceProvider>
+      <AppLayout />
+    </WorkspaceProvider>
+  );
 };
 
 const Guest = ({ children }) => {
@@ -30,70 +38,54 @@ const Guest = ({ children }) => {
   return children;
 };
 
-const App = () => {
-  const { loading } = UserData();
+// ── Router definition ──────────────────────────────────────────────
+const router = createBrowserRouter([
+  {
+    path: "/",
+    element: <Guest><Landing /></Guest>,
+  },
+  {
+    path: "/login",
+    element: <Guest><Login /></Guest>,
+  },
+  {
+    path: "/register",
+    element: <Guest><Register /></Guest>,
+  },
+  {
+    path: "/forgot",
+    element: <Guest><Forgot /></Guest>,
+  },
+  {
+    path: "/reset-password/:token",
+    element: <Reset />,
+  },
+  {
+    path: "/share/:token",
+    element: <ShareLinkAccess />,
+  },
+  {
+    path: "/app",
+    element: <Protected />,
+    children: [
+      { index: true, element: <Dashboard /> },
+      { path: "documents", element: <Documents /> },
+      { path: "chat", element: <Chat /> },
+      // Old standalone route now redirects into admin
+      { path: "access-requests", element: <Navigate to="/app/admin" replace /> },
+      { path: "admin", element: <WorkspaceAdmin /> },
+    ],
+  },
+  {
+    path: "*",
+    element: <Navigate to="/" replace />,
+  },
+]);
 
-  if (loading) return <Loading />;
-
-  return (
-    <ErrorBoundary>
-      <BrowserRouter>
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <Guest>
-                <Landing />
-              </Guest>
-            }
-          />
-          <Route
-            path="/login"
-            element={
-              <Guest>
-                <Login />
-              </Guest>
-            }
-          />
-          <Route
-            path="/register"
-            element={
-              <Guest>
-                <Register />
-              </Guest>
-            }
-          />
-          <Route
-            path="/forgot"
-            element={
-              <Guest>
-                <Forgot />
-              </Guest>
-            }
-          />
-          <Route path="/reset-password/:token" element={<Reset />} />
-          <Route path="/share/:token" element={<ShareLinkAccess />} />
-          <Route
-            path="/app"
-            element={
-              <Protected>
-                <WorkspaceProvider>
-                  <AppLayout />
-                </WorkspaceProvider>
-              </Protected>
-            }
-          >
-            <Route index element={<Dashboard />} />
-            <Route path="documents" element={<Documents />} />
-            <Route path="chat" element={<Chat />} />
-            <Route path="access-requests" element={<AccessRequestsPanel />} />
-            <Route path="admin" element={<WorkspaceAdmin />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </BrowserRouter>
-    </ErrorBoundary>
-  );
-};
+const App = () => (
+  <ErrorBoundary>
+    <RouterProvider router={router} />
+  </ErrorBoundary>
+);
 
 export default App;

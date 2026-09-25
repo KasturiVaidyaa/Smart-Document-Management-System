@@ -46,7 +46,9 @@ import {
   listChatSessions,
   renameChatSession,
   sendChatMessage,
+  summarizeFolder,
 } from "../controllers/chatController.js";
+import { suggestDocumentTags } from "../controllers/documentController.js";
 import { searchDocuments } from "../controllers/searchController.js";
 import uploadFile from "../middlewares/multer.js";
 import {
@@ -214,6 +216,22 @@ router.delete(
   deleteChatSession
 );
 router.post("/:workspaceId/chat", requireWorkspace, sendChatMessage);
+
+// Folder AI summary
+router.post("/:workspaceId/folders/:folderId/summarize", requireWorkspace, summarizeFolder);
+// Folder-scoped chat shortcut: POST /api/workspaces/:id/folders/:folderId/chat
+router.post("/:workspaceId/folders/:folderId/chat", requireWorkspace, (req, res, next) => {
+  // Inject folderId into body so sendChatMessage picks it up automatically
+  req.body.folderId = req.params.folderId;
+  return sendChatMessage(req, res, next);
+});
+
+// AI tag suggestions for a document
+router.post(
+  "/:workspaceId/documents/:documentId/suggest-tags",
+  requireWorkspace,
+  suggestDocumentTags
+);
 
 // Permissions (ACL)
 router.post(

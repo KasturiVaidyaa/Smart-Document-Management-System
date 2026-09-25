@@ -1,9 +1,7 @@
-import React, { useState } from 'react';
-import { UserData } from '../context/UserContext';
-import { useNavigate, Link } from 'react-router-dom';
-import { LoadingAnimation } from '../components/Loading';
-import { motion } from 'framer-motion';
-import { FaEnvelope } from 'react-icons/fa';
+import { useState } from "react";
+import { UserData } from "../context/UserContext";
+import { useNavigate, Link } from "react-router-dom";
+import { FileText, Mail } from "lucide-react";
 
 const Forgot = () => {
   const [email, setEmail] = useState("");
@@ -13,108 +11,65 @@ const Forgot = () => {
 
   const submitHandler = (e) => {
     e.preventDefault();
-
-    // Simple validation
-    if (!email.trim()) {
-      setFormError("Please enter your email address");
-      return;
-    }
-
+    if (!email.trim()) { setFormError("Please enter your email address."); return; }
     setFormError("");
     forgotUser(email, navigate);
   };
 
-  // Animation variants
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    visible: {
-      opacity: 1,
-      transition: {
-        duration: 0.5,
-        when: "beforeChildren",
-        staggerChildren: 0.1
-      }
-    }
-  };
-
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    visible: { y: 0, opacity: 1 }
-  };
-
   return (
-    <div className='min-h-screen flex items-center justify-center bg-gradient-to-b from-black to-gray-900'>
-      <motion.div
-        className='p-8 rounded-lg shadow-lg w-full max-w-md backdrop-blur-sm bg-opacity-80 bg-[#1A1A1D] border border-gray-800'
-        initial="hidden"
-        animate="visible"
-        variants={containerVariants}
-      >
-        <motion.h2 className='text-xl font-semibold text-center mb-2 text-[#50c878]' variants={itemVariants}>
-          DMS
-        </motion.h2>
+    <div className="min-h-screen flex items-center justify-center bg-zinc-950 px-4">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute left-1/2 top-1/3 -translate-x-1/2 -translate-y-1/2 h-[400px] w-[600px] rounded-full bg-blue-600/6 blur-[120px]" />
+      </div>
 
-        <motion.h2 className='text-2xl font-bold text-white text-center mb-6' variants={itemVariants}>
-          Forgot Password
-        </motion.h2>
-
-        <motion.p className='text-gray-300 text-sm text-center mb-6' variants={itemVariants}>
-          Enter your email address
-        </motion.p>
-
-        {formError && (
-          <motion.div
-            className='mb-4 p-3 bg-red-500 bg-opacity-20 border border-red-500 rounded text-red-300 text-sm'
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            transition={{ duration: 0.3 }}
-          >
-            {formError}
-          </motion.div>
-        )}
-
-        <form onSubmit={submitHandler}>
-          <motion.div className='mb-6' variants={itemVariants}>
-            <label htmlFor="email" className='block text-sm font-medium text-gray-300 mb-1'>
-              EMAIL
-            </label>
-            <div className='relative'>
-              <div className='absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none'>
-                <FaEnvelope className='text-gray-500' />
-              </div>
-              <input
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                type="email"
-                id='email'
-                className='w-full py-2 pl-10 pr-3 border border-gray-700 bg-gray-900 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-[#50c878] focus:border-transparent'
-                placeholder='Enter your email'
-              />
-            </div>
-          </motion.div>
-
-          <motion.button
-            type='submit'
-            className='w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-[#50c878] hover:bg-[#3daf63] focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#50c878] transition-colors duration-200 flex items-center justify-center'
-            disabled={btnLoading}
-            variants={itemVariants}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.98 }}
-          >
-            {btnLoading ? <LoadingAnimation /> : "SEND RESET LINK"}
-          </motion.button>
-        </form>
-
-        <motion.div className='mt-6 text-center' variants={itemVariants}>
-          <div className='text-gray-300'>
-            Remember your password?{' '}
-            <Link to="/login" className='font-medium text-[#50c878] hover:underline'>
-              Sign in
-            </Link>
+      <div className="relative w-full max-w-sm">
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/80 backdrop-blur-sm p-8 shadow-2xl">
+          <div className="flex flex-col items-center mb-7">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 shadow-xl shadow-blue-950/50 mb-4">
+              <FileText className="h-6 w-6 text-white" />
+            </span>
+            <h1 className="text-xl font-bold text-zinc-100">Reset password</h1>
+            <p className="mt-2 text-sm text-zinc-500 text-center max-w-xs">
+              Enter your account email and we'll send you a one-time reset link.
+            </p>
           </div>
-        </motion.div>
-      </motion.div>
+
+          {formError && (
+            <div className="mb-5 rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2.5 text-sm text-rose-300">
+              {formError}
+            </div>
+          )}
+
+          <form onSubmit={submitHandler} className="space-y-5">
+            <div>
+              <label htmlFor="email" className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">Email</label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-600 pointer-events-none" />
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  required
+                  autoFocus
+                  placeholder="you@company.com"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 py-2.5 pl-10 pr-3 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15"
+                />
+              </div>
+            </div>
+
+            <button type="submit" disabled={btnLoading}
+              className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-semibold text-white shadow-lg shadow-blue-950/30 hover:bg-blue-500 disabled:opacity-60 transition-all">
+              {btnLoading ? "Sending…" : "Send reset link"}
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-zinc-500">
+            Remember your password?{" "}
+            <Link to="/login" className="font-semibold text-blue-400 hover:text-blue-300 transition-colors">Sign in</Link>
+          </p>
+        </div>
+      </div>
     </div>
   );
 };

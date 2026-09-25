@@ -138,17 +138,18 @@ export const FolderTree = ({
   };
 
   return (
-    <aside className="w-full lg:w-64 flex flex-col gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 backdrop-blur-sm">
-      <div className="flex items-center justify-between px-1 pb-2 border-b border-zinc-800/80">
-        <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
-          Folders
-        </span>
+    <aside className="flex w-full flex-col gap-3 rounded-xl border border-zinc-800/90 bg-zinc-900/45 p-3 lg:w-64 lg:shrink-0">
+      <div className="flex items-center justify-between border-b border-zinc-800/80 px-1 pb-3">
+        <div>
+          <p className="text-sm font-semibold text-zinc-200">My files</p>
+          <p className="mt-0.5 text-[11px] text-zinc-500">Browse your workspace</p>
+        </div>
         <button
           onClick={() => onOpenCreateModal(null)}
-          className="flex items-center gap-1 text-xs font-medium text-blue-400 hover:text-blue-300 rounded px-2 py-1 hover:bg-blue-500/10 transition-colors"
+          className="flex items-center gap-1.5 rounded-lg border border-zinc-700/80 px-2.5 py-1.5 text-xs font-semibold text-zinc-300 transition-colors hover:border-blue-500/50 hover:bg-blue-500/10 hover:text-blue-300"
         >
           <FolderPlus className="h-3.5 w-3.5" />
-          New
+          New folder
         </button>
       </div>
 
@@ -187,7 +188,7 @@ export const FolderTree = ({
       </div>
 
       {/* Folder Tree Hierarchy */}
-      <div className="flex-1 overflow-y-auto space-y-0.5 max-h-96 pr-1">
+      <div className="flex-1 space-y-0.5 overflow-y-auto pr-1 lg:max-h-[calc(100vh-24rem)]">
         {folders.length === 0 ? (
           <p className="px-3 py-4 text-center text-xs text-zinc-500">
             No folders created yet.
@@ -198,7 +199,7 @@ export const FolderTree = ({
       </div>
 
       {/* Trash Section */}
-      <div className="pt-2 border-t border-zinc-800/80">
+      <div className="border-t border-zinc-800/80 pt-2">
         <div
           onClick={() => onSelectTab("trash")}
           className={`flex items-center justify-between rounded-lg px-3 py-2 cursor-pointer transition-all text-sm ${
