@@ -57,7 +57,15 @@ const Chat = () => {
   const [folderSummary, setFolderSummary] = useState("");
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
-  useEffect(() => { scrollToBottom(); }, [messages, sending]);
+  const lastScrollRef = useRef(0);
+  useEffect(() => {
+    // Throttle scroll during streaming to every 200ms
+    const now = Date.now();
+    if (now - lastScrollRef.current > 200 || !sending) {
+      scrollToBottom();
+      lastScrollRef.current = now;
+    }
+  }, [messages, sending]);
 
   const loadDocuments = useCallback(async () => {
     if (!currentWorkspaceId) return;
@@ -77,8 +85,12 @@ const Chat = () => {
 
   const loadSessions = useCallback(async () => {
     if (!currentWorkspaceId) return;
-    const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/chat/sessions`);
-    setSessions(data.sessions || []);
+    try {
+      const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/chat/sessions`);
+      setSessions(data.sessions || []);
+    } catch {
+      // Silent — session list is non-critical
+    }
   }, [currentWorkspaceId]);
 
   const loadMessages = useCallback(async (id) => {
@@ -133,6 +145,8 @@ const Chat = () => {
 
   useEffect(() => {
     loadMessages(sessionId).catch(() => {});
+    // Auto-focus textarea when selecting a session
+    if (sessionId) setTimeout(() => textareaRef.current?.focus(), 100);
   }, [sessionId, currentWorkspaceId]);
 
   const clearScope = () => {
@@ -208,6 +222,9 @@ const Chat = () => {
       const baseUrl = import.meta.env.VITE_API_URL || "http://localhost:5005";
       const token = localStorage.getItem("token");
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
       const res = await fetch(`${baseUrl}/api/workspaces/${currentWorkspaceId}/chat`, {
         method: "POST",
         headers: {
@@ -215,7 +232,10 @@ const Chat = () => {
           ...(token && { Authorization: `Bearer ${token}` }),
         },
         body: JSON.stringify(payload),
+        signal: controller.signal,
       });
+
+      clearTimeout(timeout);
 
       if (!res.ok) {
         throw new Error("Chat request failed");
@@ -284,7 +304,10 @@ const Chat = () => {
         await loadMessages(finalSessionId);
       }
     } catch (err) {
-      toast.error(err?.message || err?.response?.data?.message || "Chat failed. Is the AI service running?");
+      const errorMsg = err?.name === "AbortError"
+        ? "AI response timed out. Please try again."
+        : (err?.message || err?.response?.data?.message || "Chat failed. Is the AI service running?");
+      toast.error(errorMsg);
       setMessages((prev) => prev.filter((m) => m._id !== "temp-ai"));
       if (sessionId) await loadMessages(sessionId).catch(() => {});
     } finally {

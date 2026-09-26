@@ -204,12 +204,14 @@ async def _classify_category(
     """Classify the document into one of the workspace categories."""
     if not texts:
         return "General"
-    if not categories:
-        categories = ["HR", "Finance", "Projects", "Legal", "General"]
+    if categories:
+        categories_str = "\n".join(f"- {c}" for c in categories)
+        categories_text = f"Pick from this list if possible:\n{categories_str}\nIf none fit, invent a short, appropriate category."
+    else:
+        categories_text = "Invent a short, appropriate category (e.g., Invoices, Guidelines, Meeting Notes)."
 
     combined = "\n\n".join(texts)[:_MAX_SUMMARY_CHARS]
-    categories_str = "\n".join(f"- {c}" for c in categories)
-    prompt = CATEGORIZE_PROMPT.format(text=combined, categories=categories_str)
+    prompt = CATEGORIZE_PROMPT.format(text=combined, categories_text=categories_text)
     try:
         result = await llm.chat(
             [{"role": "user", "content": prompt}],
@@ -218,12 +220,17 @@ async def _classify_category(
         )
         # Strip <think> tags from thinking models
         result = re.sub(r"<think>.*?</think>", "", result, flags=re.DOTALL)
-        result = result.strip().strip('"').strip("'")
-        # Validate the response is one of the given categories
-        for cat in categories:
-            if cat.lower() == result.lower():
-                return cat
-        return result if result else "General"
+        result = result.strip()
+        
+        if categories:
+            # Validate the response is one of the given categories
+            for cat in categories:
+                if cat.lower() in result.lower():
+                    return cat
+        
+        # If no predefined categories or no match, return the AI's generated category
+        # Clean up any trailing periods or whitespace
+        return result.strip(". ") if result else "General"
     except Exception:
         logger.exception("Category classification failed")
         return "General"

@@ -31,7 +31,12 @@ _CONVERSATIONAL_RE = re.compile(
     r"|how are you|what'?s up|sup"
     r"|ok(ay)?|sure|yes|no|yep|nope"
     r"|yo|what'?s good"
-    r"|welcome|greetings)"
+    r"|welcome|greetings"
+    r"|who\s+are\s+you|what\s+are\s+you"
+    r"|what\s+can\s+you\s+do|help(\s+me)?"
+    r"|can\s+you\s+help(\s+me)?"
+    r"|what\s+do\s+you\s+do"
+    r"|tell\s+me\s+about\s+yourself)"
     r"[\s!?.,;:)]*$",
     re.IGNORECASE,
 )
@@ -78,7 +83,7 @@ async def chat(
             answer = await llm.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.7,
-                max_tokens=200,
+                max_tokens=1000,
             )
             answer = _clean_response(answer)
         except Exception:
@@ -218,9 +223,15 @@ async def chat_stream(
         prompt = CONVERSATIONAL_PROMPT.format(question=question)
         yield json.dumps({"type": "meta", "citedDocumentIds": [], "citedChunks": [], "refused": False}) + "\n"
         try:
-            async for chunk in llm.chat_stream([{"role": "user", "content": prompt}], temperature=0.7, max_tokens=200):
+            stripper = ThinkStripper()
+            async for chunk in llm.chat_stream([{"role": "user", "content": prompt}], temperature=0.7, max_tokens=1000):
                 if chunk:
-                    yield json.dumps({"type": "text", "content": _clean_response_chunk(chunk)}) + "\n"
+                    cleaned = stripper.process_chunk(chunk)
+                    if cleaned:
+                        yield json.dumps({"type": "text", "content": cleaned}) + "\n"
+            flushed = stripper.flush()
+            if flushed:
+                yield json.dumps({"type": "text", "content": flushed}) + "\n"
         except Exception:
             yield json.dumps({"type": "text", "content": "Hello! 👋 I'm your document assistant. Feel free to ask me anything about the documents in this workspace."}) + "\n"
         yield json.dumps({"type": "done"}) + "\n"
@@ -284,9 +295,15 @@ async def chat_stream(
     yield json.dumps({"type": "meta", "citedDocumentIds": cited_doc_ids, "citedChunks": cited_chunks, "refused": False}) + "\n"
 
     try:
+        stripper = ThinkStripper()
         async for chunk in llm.chat_stream([{"role": "user", "content": system_prompt}], temperature=0.3, max_tokens=4000):
             if chunk:
-                yield json.dumps({"type": "text", "content": _clean_response_chunk(chunk)}) + "\n"
+                cleaned = stripper.process_chunk(chunk)
+                if cleaned:
+                    yield json.dumps({"type": "text", "content": cleaned}) + "\n"
+        flushed = stripper.flush()
+        if flushed:
+            yield json.dumps({"type": "text", "content": flushed}) + "\n"
     except Exception:
         yield json.dumps({"type": "error", "content": "I encountered an error processing your question."}) + "\n"
     
@@ -487,8 +504,8 @@ def _build_history_block(history: list[dict[str, str]]) -> str:
         role = msg.get("role", "user").upper()
         content = msg.get("content", "")
         # Truncate long history messages to keep context manageable
-        if len(content) > 500:
-            content = content[:500] + "..."
+        if len(content) > 1000:
+            content = content[:1000] + "..."
         lines.append(f"  {role}: {content}")
     return "\n".join(lines)
 
@@ -510,11 +527,12 @@ def _clean_response(text: str) -> str:
     # Remove <think> tags
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    # Strip common preambles
+    # Strip common standalone filler preambles (only when followed by punctuation)
+    # Conservative: does NOT strip "let me", "here's", "I'll", "based on" etc.
+    # which are often legitimate sentence starters in answers
     preamble_re = re.compile(
-        r"^(?:\s*(?:sure|certainly|of course|absolutely|okay|ok|"
-        r"let me|i(?:'|')?ll|based on|here(?:'s| is))"
-        r"[\s,:.!—-]*)+",
+        r"^(?:sure|certainly|of course|absolutely|okay|ok)"
+        r"[,!.:;\s]+",
         re.IGNORECASE,
     )
     text = preamble_re.sub("", text).lstrip()
@@ -522,9 +540,46 @@ def _clean_response(text: str) -> str:
     return text
 
 
-def _clean_response_chunk(text: str) -> str:
-    """Light cleaning for streamed chunks — avoid breaking words."""
-    return text
+class ThinkStripper:
+    """Stateful stripper for <think> tags across streamed chunks."""
+    def __init__(self):
+        self.buffer = ""
+        self.inside_think = False
+
+    def process_chunk(self, text: str) -> str:
+        result = []
+        for char in text:
+            self.buffer += char
+            if self.inside_think:
+                if self.buffer.endswith("</think>"):
+                    self.inside_think = False
+                    self.buffer = ""
+            else:
+                if self.buffer.endswith("<think>"):
+                    self.inside_think = True
+                    # Remove the <think> tag from any previously queued output
+                    queued = self.buffer[:-len("<think>")]
+                    if queued:
+                        result.append(queued)
+                    self.buffer = "<think>"
+                else:
+                    # Only emit chars that are clearly not part of a potential tag
+                    if len(self.buffer) > 7:  # len("<think>") == 7
+                        safe = self.buffer[:-7]
+                        result.append(safe)
+                        self.buffer = self.buffer[-7:]
+
+        return "".join(result)
+
+    def flush(self) -> str:
+        """Flush any remaining safe characters at the end of the stream."""
+        if not self.inside_think and self.buffer and not "<think>".startswith(self.buffer):
+            # If what's left in the buffer isn't the start of a think tag, it's safe.
+            # But just to be completely safe, we'll flush whatever is left if not inside a think tag.
+            ret = self.buffer
+            self.buffer = ""
+            return ret
+        return ""
 
 
 # ---------------------------------------------------------------------------
@@ -660,12 +715,15 @@ async def classify_document(
 
     combined = "\n\n".join(texts)[:4000]
 
-    if not categories:
-        categories = ["HR", "Finance", "Projects", "Legal", "General"]
+    if categories:
+        categories_str = "\n".join(f"- {c}" for c in categories)
+        categories_text = f"Pick from this list if possible:\n{categories_str}\nIf none fit, invent a short, appropriate category."
+    else:
+        categories_text = "Invent a short, appropriate category (e.g., Invoices, Guidelines, Meeting Notes)."
 
     from app.services.prompts import CATEGORIZE_PROMPT
     prompt = CATEGORIZE_PROMPT.format(
-        categories="\n".join(f"- {c}" for c in categories),
+        categories_text=categories_text,
         text=combined,
     )
 
@@ -675,12 +733,15 @@ async def classify_document(
             temperature=0.1,
             max_tokens=50,
         )
-        answer = _clean_response(answer)
-        category = answer.strip().split("\n")[0].strip()
-        # Validate it's one of the known categories
-        if category not in categories:
-            category = "General"
-        return {"category": category, "refused": False}
+        answer = _clean_response(answer).strip()
+        
+        if categories:
+            for c in categories:
+                if c.lower() in answer.lower():
+                    return {"category": c, "refused": False}
+        
+        # If no predefined categories or no match, return the AI's generated category
+        return {"category": answer.strip(". ") if answer else "General", "refused": False}
     except Exception:
         logger.exception("Classify LLM call failed")
         return {"category": "General", "refused": True}

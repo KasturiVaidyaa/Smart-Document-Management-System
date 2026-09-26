@@ -127,11 +127,13 @@ router.post("/:workspaceId/documents/bulk-move", requireWorkspace, bulkMoveDocum
 router.get(
   "/:workspaceId/documents/:documentId/file",
   requireWorkspace,
+  checkDocumentPermission("view"),
   getDocumentFile
 );
 router.patch(
   "/:workspaceId/documents/:documentId/move",
   requireWorkspace,
+  checkDocumentPermission("edit"),
   moveDocument
 );
 router.patch(
@@ -149,27 +151,32 @@ router.patch(
 router.patch(
   "/:workspaceId/documents/:documentId/trash",
   requireWorkspace,
+  checkDocumentPermission("delete"),
   trashDocument
 );
 router.post(
   "/:workspaceId/documents/:documentId/restore",
   requireWorkspace,
+  checkDocumentPermission("edit"),
   restoreDocument
 );
 router.delete(
   "/:workspaceId/documents/:documentId/permanent",
   requireWorkspace,
+  checkDocumentPermission("delete"),
   permanentDeleteDocument
 );
 
 router.post(
   "/:workspaceId/documents/:documentId/reprocess",
   requireWorkspace,
+  checkDocumentPermission("edit"),
   reprocessDocument
 );
 router.get(
   "/:workspaceId/documents/:documentId/ai-status",
   requireWorkspace,
+  checkDocumentPermission("view"),
   getDocumentAiStatus
 );
 
@@ -177,22 +184,26 @@ router.get(
 router.get(
   "/:workspaceId/documents/:documentId/versions",
   requireWorkspace,
+  checkDocumentPermission("view"),
   listDocumentVersions
 );
 router.post(
   "/:workspaceId/documents/:documentId/versions",
   requireWorkspace,
+  checkDocumentPermission("edit"),
   uploadFile,
   createDocumentVersion
 );
 router.get(
   "/:workspaceId/documents/:documentId/versions/:versionId/file",
   requireWorkspace,
+  checkDocumentPermission("view"),
   getDocumentVersionFile
 );
 router.post(
   "/:workspaceId/documents/:documentId/versions/:versionId/revert",
   requireWorkspace,
+  checkDocumentPermission("edit"),
   revertDocumentVersion
 );
 

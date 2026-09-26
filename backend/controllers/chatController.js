@@ -160,6 +160,12 @@ export const sendChatMessage = TryCatch(async (req, res) => {
 
   if (allowed.length === 0) {
     // No documents available in scope — still answer but note limitation
+    const userMsg = await ChatMessage.create({
+      sessionId: session._id,
+      workspaceId: req.workspace._id,
+      role: "user",
+      content: question,
+    });
     const noDocsMsg = await ChatMessage.create({
       sessionId: session._id,
       workspaceId: req.workspace._id,
@@ -169,15 +175,9 @@ export const sendChatMessage = TryCatch(async (req, res) => {
         "Please make sure documents are uploaded and processed before chatting.",
       citedDocumentIds: [],
     });
-    await ChatMessage.create({
-      sessionId: session._id,
-      workspaceId: req.workspace._id,
-      role: "user",
-      content: question,
-    });
     session.lastMessageAt = new Date();
     await session.save();
-    return res.json({ session, userMessage: null, assistantMessage: noDocsMsg, citedDocumentIds: [], refused: false });
+    return res.json({ session, userMessage: userMsg, assistantMessage: noDocsMsg, citedDocumentIds: [], refused: false });
   }
 
   // ── Build conversation history ───────────────────────────────────────────
@@ -249,12 +249,13 @@ export const sendChatMessage = TryCatch(async (req, res) => {
     const aiMeta = streamResult.meta || {};
     let assistantMessage = null;
     
-    if (streamResult.answer) {
+    const aiContent = streamResult.answer || "";
+    if (aiContent) {
       assistantMessage = await ChatMessage.create({
         sessionId: session._id,
         workspaceId: req.workspace._id,
         role: "assistant",
-        content: streamResult.answer,
+        content: aiContent,
         citedDocumentIds: aiMeta.citedDocumentIds || [],
       });
     }
@@ -330,7 +331,7 @@ export const summarizeFolder = TryCatch(async (req, res) => {
   const result = await ragSummarize({
     workspaceId: String(req.workspace._id),
     documentIds: docIds,
-    prompt: req.body.prompt || `Summarize the key themes and content of these ${docIds.length} documents.`,
+    prompt: req.body?.prompt || `Summarize the key themes and content of these ${docIds.length} documents.`,
   });
 
   await AuditEvent.create({

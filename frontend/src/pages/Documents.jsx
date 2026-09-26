@@ -8,7 +8,7 @@ import {
   History, Trash2, RotateCcw, CornerDownRight,
   ChevronRight, MessageSquare, Upload, AlertTriangle,
   FolderOpen, Home, CheckSquare, Square, Search, X,
-  Eye, Download, Shield, Link2, Building2, Activity,
+  Eye, Download, Shield, ShieldCheck, Link2, Building2, Activity,
   Brain, RefreshCw, ChevronDown, ChevronUp, Tag,
   Filter, CalendarDays, Sparkles, MoreVertical, Plus,
   FolderPlus,
@@ -24,6 +24,7 @@ import { BulkActionBar } from "../components/documents/BulkActionBar";
 import { PermissionsModal } from "../components/documents/PermissionsModal";
 import { ShareLinkModal } from "../components/documents/ShareLinkModal";
 import { DocumentTimelineModal } from "../components/documents/DocumentTimelineModal";
+import AccessRequestModal from "../components/documents/AccessRequestModal";
 import { DocumentSkeleton } from "../components/documents/DocumentSkeleton";
 
 /* ─── Helpers ─────────────────────────────────────────────────── */
@@ -95,6 +96,7 @@ const HighlightedSnippet = ({ text = "" }) => {
 /* ─── AI Inline Panel ─────────────────────────────────────────── */
 const AiPanel = ({ doc, workspaceId, onReprocessed }) => {
   const [autoTagging, setAutoTagging] = useState(false);
+  const [reprocessing, setReprocessing] = useState(false);
 
   const handleReprocess = async () => {
     setReprocessing(true);
@@ -209,7 +211,7 @@ const AiPanel = ({ doc, workspaceId, onReprocessed }) => {
 };
 
 /* ─── Context Menu ────────────────────────────────────────────── */
-const DocContextMenu = ({ x, y, doc, activeTab, onClose, onOpen, onDownload, onVersion, onShare, onActivity, onPermissions, onDepartment, onMove, onTrash, onRestore, onPermDelete, workspaceId }) => {
+const DocContextMenu = ({ x, y, doc, activeTab, onClose, onOpen, onDownload, onVersion, onShare, onActivity, onPermissions, onDepartment, onMove, onTrash, onRestore, onPermDelete, onRequestAccess, workspaceId }) => {
   const ref = useRef(null);
 
   useEffect(() => {
@@ -266,6 +268,9 @@ const DocContextMenu = ({ x, y, doc, activeTab, onClose, onOpen, onDownload, onV
             <Activity className="h-4 w-4 text-blue-400" /> Activity Timeline
           </button>
           <div className="ctx-separator" />
+          <button className="ctx-item" onClick={() => { onRequestAccess(doc); onClose(); }}>
+            <ShieldCheck className="h-4 w-4 text-blue-400" /> Request Access
+          </button>
           <button className="ctx-item" onClick={() => { onShare(doc); onClose(); }}>
             <Link2 className="h-4 w-4 text-emerald-400" /> Share Link
           </button>
@@ -437,6 +442,7 @@ const Documents = () => {
 
   // Context menu
   const [ctxMenu, setCtxMenu] = useState(null); // { x, y, doc }
+  const [accessRequestDoc, setAccessRequestDoc] = useState(null);
 
   // Modals
   const [createFolderParentId, setCreateFolderParentId] = useState(null);
@@ -479,10 +485,10 @@ const Documents = () => {
     } catch { /* silent */ }
   };
 
-  const loadDocuments = async () => {
+  const loadDocuments = async (silent = false) => {
     if (!currentWorkspaceId) return;
-    setLoading(true);
-    setIsSearchMode(false);
+    if (!silent) setLoading(true);
+    if (!silent) setIsSearchMode(false);
     try {
       const params = {};
       if (activeTab === "trash") {
@@ -497,9 +503,9 @@ const Documents = () => {
       const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/documents`, { params });
       setDocuments(data.documents || []);
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Could not load documents");
+      if (!silent) toast.error(error?.response?.data?.message || "Could not load documents");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -515,6 +521,25 @@ const Documents = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentWorkspaceId, activeTab, selectedFolderId, selectedDepartmentId, filterAiCategory]);
+
+  // Poll for document status updates if any document is processing
+  useEffect(() => {
+    const hasPending = documents.some((d) => {
+      const proc = d.currentVersionId?.processing;
+      return (
+        proc?.extract === "pending" || proc?.extract === "running" ||
+        proc?.embed === "pending" || proc?.embed === "running" ||
+        proc?.classify === "pending" || proc?.classify === "running"
+      );
+    });
+
+    if (hasPending && !isSearchMode) {
+      const interval = setInterval(() => {
+        loadDocuments(true);
+      }, 5000);
+      return () => clearInterval(interval);
+    }
+  }, [documents, currentWorkspaceId, activeTab, selectedFolderId, selectedDepartmentId, filterAiCategory, isSearchMode]);
 
   // Scroll to highlighted doc
   useEffect(() => {
@@ -608,7 +633,12 @@ const Documents = () => {
       const { data } = await api.get(`/api/workspaces/${currentWorkspaceId}/documents/${doc._id}/file`, { params: { disposition: "inline" } });
       if (data.url) window.open(data.url, "_blank", "noopener,noreferrer");
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Could not open file preview");
+      if (error?.response?.status === 403) {
+        toast.error("You need access to view this document.");
+        setAccessRequestDoc(doc);
+      } else {
+        toast.error(error?.response?.data?.message || "Could not open file preview");
+      }
     }
   };
 
@@ -624,7 +654,12 @@ const Documents = () => {
         window.document.body.removeChild(link);
       }
     } catch (error) {
-      toast.error(error?.response?.data?.message || "Could not download file");
+      if (error?.response?.status === 403) {
+        toast.error("You need access to download this document.");
+        setAccessRequestDoc(doc);
+      } else {
+        toast.error(error?.response?.data?.message || "Could not download file");
+      }
     }
   };
 
@@ -1235,6 +1270,7 @@ const Documents = () => {
           onTrash={onTrashDoc}
           onRestore={onRestoreDoc}
           onPermDelete={(docs) => setPermDeleteConfirmDocs(docs)}
+          onRequestAccess={(doc) => setAccessRequestDoc(doc)}
           workspaceId={currentWorkspaceId}
         />
       )}
@@ -1304,6 +1340,13 @@ const Documents = () => {
         onCancel={() => setPermDeleteConfirmDocs(null)}
         onConfirm={onConfirmPermanentDelete}
       />
+      {accessRequestDoc && (
+        <AccessRequestModal
+          workspaceId={currentWorkspaceId}
+          document={accessRequestDoc}
+          onClose={() => setAccessRequestDoc(null)}
+        />
+      )}
     </div>
   );
 };

@@ -10,8 +10,7 @@ useful, and grounded in the evidence.
 <rules>
 - Start with the answer immediately. No preamble such as "Sure", "Certainly",
   "Based on the context", or "The document says".
-- If the user asks a general conversational question (e.g., "hi", "who are you", "can you help me?"), respond politely and helpfully without referencing documents.
-- Otherwise, if the evidence does not contain the answer, say exactly:
+- If the evidence does not contain the answer, say exactly:
   "I couldn't find relevant information in the available documents to answer this question."
   Do not guess from general knowledge.
 - Keep simple answers short. For substantive questions, be complete but concise.
@@ -47,12 +46,11 @@ SUMMARY:
 
 CATEGORIZE_PROMPT = """\
 You are a document classification assistant. Based on the document text below,
-pick the single most appropriate category from this list:
+determine the single most appropriate category for this document.
 
-{categories}
+{categories_text}
 
-If none of the categories fit well, respond with "General".
-Respond with ONLY the category name, nothing else.
+Respond with ONLY the category name, nothing else. Keep it to 1-2 words.
 
 DOCUMENT TEXT:
 {text}
